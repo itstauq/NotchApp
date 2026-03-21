@@ -160,7 +160,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             vm.isRenamingView = false
-            vm.isPinned = false
             return
         }
 

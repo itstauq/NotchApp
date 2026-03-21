@@ -7,7 +7,8 @@ final class NotchViewModel {
     var isElevated = false
     var isQuickPeeking = false
     var isExpanded = false
-    var isPinned = false  // prevents auto-collapse (dropdown open, pin button, etc.)
+    var isViewPinned = false
+    var isViewMenuOpen = false
     var isRenamingView = false
     var renameViewName = ""
     var renameViewFieldScreenRect: CGRect = .zero
@@ -31,6 +32,10 @@ final class NotchViewModel {
     private static let elevateAnim: Animation = .interpolatingSpring(
         duration: 0.35, bounce: 0.45
     )
+
+    private var preventsAutoCollapse: Bool {
+        isViewPinned || isViewMenuOpen || isRenamingView
+    }
 
     func mouseEntered() {
         log.write("VM: mouseEntered")
@@ -57,12 +62,12 @@ final class NotchViewModel {
         elevateTask?.cancel()
         isMouseInside = false
 
-        guard !isPinned else { return }
+        guard !preventsAutoCollapse else { return }
 
         collapseTask?.cancel()
         collapseTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(200))
-            guard !Task.isCancelled, !isPinned, !isMouseInside else { return }
+            guard !Task.isCancelled, !preventsAutoCollapse, !isMouseInside else { return }
             collapse()
         }
     }
@@ -79,11 +84,34 @@ final class NotchViewModel {
 
     func collapse() {
         log.write("VM: collapsing")
+        collapseTask?.cancel()
         withAnimation(Self.elevateAnim) {
             isExpanded = false
             isQuickPeeking = false
             isElevated = false
-            isPinned = false
+        }
+        isViewMenuOpen = false
+    }
+
+    func togglePinnedView() {
+        collapseTask?.cancel()
+
+        if isViewPinned {
+            log.write("VM: unpinning view")
+            isViewPinned = false
+
+            if !isMouseInside, !isViewMenuOpen, !isRenamingView {
+                collapse()
+            }
+        } else {
+            log.write("VM: pinning view")
+            isViewPinned = true
+
+            withAnimation(Self.peekAnim) {
+                isExpanded = true
+                isElevated = true
+                isQuickPeeking = true
+            }
         }
     }
 }

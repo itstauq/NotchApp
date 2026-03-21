@@ -43,10 +43,26 @@ struct NotchContentView: View {
 
     private var expandedContent: some View {
         ZStack(alignment: .topLeading) {
-            // View switcher at notch level, left side
-            ViewSwitcher(viewManager: vm.viewManager, vm: vm)
-                .padding(.top, (vm.notchHeight - 24) / 2)
-                .padding(.leading, 4)
+            HStack {
+                ViewSwitcher(viewManager: vm.viewManager, vm: vm)
+
+                Spacer(minLength: 0)
+
+                HeaderAccessoryButton(
+                    activeSymbol: "pin.fill",
+                    inactiveSymbol: "pin",
+                    tint: Color(red: 0.98, green: 0.39, blue: 0.43),
+                    isActive: vm.isViewPinned,
+                    inactiveRotation: .degrees(45)
+                ) {
+                    vm.togglePinnedView()
+                }
+
+                HeaderAccessoryButton(activeSymbol: "gearshape.fill") {}
+            }
+            .padding(.top, max(10, (vm.notchHeight - 26) / 2))
+            .padding(.leading, 12)
+            .padding(.trailing, 14)
 
             // Widget area below the notch
             VStack {
@@ -64,6 +80,38 @@ struct NotchContentView: View {
                 RenameViewDialog(vm: vm)
             }
         }
+    }
+}
+
+private struct HeaderAccessoryButton: View {
+    var activeSymbol: String
+    var inactiveSymbol: String?
+    var tint: Color = .white
+    var isActive = false
+    var activeRotation: Angle = .zero
+    var inactiveRotation: Angle = .zero
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: isActive ? activeSymbol : (inactiveSymbol ?? activeSymbol))
+                .font(.system(size: 11, weight: .semibold))
+                .rotationEffect(isActive ? activeRotation : inactiveRotation)
+                .foregroundStyle((isActive ? tint : .white).opacity(isActive ? 0.95 : 0.72))
+                .frame(width: 26, height: 26)
+                .background(
+                    Circle()
+                        .fill(isActive ? tint.opacity(0.18) : .white.opacity(0.06))
+                )
+                .overlay(
+                    Circle()
+                        .strokeBorder(
+                            isActive ? tint.opacity(0.4) : .white.opacity(0.06),
+                            lineWidth: 1
+                        )
+                )
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -172,12 +220,10 @@ struct RenameViewDialog: View {
             vm.viewManager.renameView(view, to: trimmed)
         }
         vm.isRenamingView = false
-        vm.isPinned = false
     }
 
     private func cancel() {
         vm.isRenamingView = false
-        vm.isPinned = false
     }
 
     private func updateTextFieldFrame(_ frame: CGRect) {
