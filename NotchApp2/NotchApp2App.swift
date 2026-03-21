@@ -13,8 +13,11 @@ struct NotchApp2App: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let logger = FileLog()
-    private var eventMonitor: Any?
+    private var moveMonitor: Any?
+    private var clickMonitor: Any?
+    private var localClickMonitor: Any?
     private var notchRect: CGRect = .zero
+    private var expandedRect: CGRect = .zero
     private var notchPanel: NotchPanel?
     private var blurPanel: NotchPanel?
     private let vm = NotchViewModel()
@@ -27,7 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        if let monitor = eventMonitor { NSEvent.removeMonitor(monitor) }
+        if let monitor = moveMonitor { NSEvent.removeMonitor(monitor) }
+        if let monitor = clickMonitor { NSEvent.removeMonitor(monitor) }
+        if let monitor = localClickMonitor { NSEvent.removeMonitor(monitor) }
         logger.write("App exiting")
     }
 
@@ -47,11 +52,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         vm.notchWidth = w
         vm.notchHeight = h
+        vm.screenWidth = screen.frame.width
+
+        // Expanded rect for click-outside detection
+        let ew = vm.expandedWidth
+        let eh = vm.expandedHeight
+        expandedRect = CGRect(
+            x: screen.frame.midX - ew / 2,
+            y: screen.frame.maxY - eh,
+            width: ew, height: eh
+        )
         logger.write("Notch rect: \(notchRect)")
 
-        // Panel sizing — room for grow effect + blur bleed
-        let panelW = w + 60
-        let panelH = h + 40
+        // Panel sizing — room for expanded state
+        let panelW = ew + 40
+        let panelH = eh + 20
         let panelRect = NSRect(
             x: screen.frame.midX - panelW / 2,
             y: screen.frame.maxY - panelH,
@@ -61,7 +76,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Back panel: progressive blur glow (behind the notch)
         let blur = NotchPanel(
             contentRect: panelRect,
-            level: .init(rawValue: NSWindow.Level.mainMenu.rawValue + 1)
+            level: .init(rawValue: NSWindow.Level.mainMenu.rawValue + 1),
+            kind: .blur
         )
         blur.setView(NotchBlurView(vm: vm))
         blur.alphaValue = 0
@@ -71,7 +87,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Front panel: the notch shape itself
         let panel = NotchPanel(
             contentRect: panelRect,
-            level: .init(rawValue: NSWindow.Level.mainMenu.rawValue + 2)
+            level: .init(rawValue: NSWindow.Level.mainMenu.rawValue + 2),
+            kind: .content
         )
         panel.setView(NotchContentView(vm: vm))
         panel.alphaValue = 0
@@ -79,32 +96,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchPanel = panel
     }
 
+    private func contains(_ rect: CGRect, _ point: CGPoint) -> Bool {
+        point.x >= rect.minX && point.x <= rect.maxX
+            && point.y >= rect.minY && point.y <= rect.maxY
+    }
+
     private func startMouseMonitor() {
-        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+        // Mouse move — hover for peek, hover-exit for collapse
+        moveMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
             guard let self else { return }
             let mouse = NSEvent.mouseLocation
-            let inside = mouse.x >= notchRect.minX && mouse.x <= notchRect.maxX
-                && mouse.y >= notchRect.minY && mouse.y <= notchRect.maxY
+
+            // When expanded, track the expanded rect for exit
+            // When not expanded, track the notch rect for entry
+            let checkRect = vm.isExpanded ? expandedRect : notchRect
+            let inside = contains(checkRect, mouse)
+
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 if inside != vm.isMouseInside {
                     if inside {
                         notchPanel?.alphaValue = 1
-                        blurPanel?.alphaValue = 1
                         vm.mouseEntered()
-                        logger.write("Mouse entered notch")
                     } else {
                         vm.mouseExited()
-                        logger.write("Mouse exited notch")
-                        // Hide panels after collapse animation completes
+                        // Hide panel after collapse animation
                         Task { @MainActor [weak self] in
                             try? await Task.sleep(for: .milliseconds(500))
-                            guard let self, !self.vm.isMouseInside else { return }
+                            guard let self, !self.vm.isMouseInside, !self.vm.isExpanded else { return }
                             self.notchPanel?.alphaValue = 0
-                            self.blurPanel?.alphaValue = 0
                         }
                     }
                 }
+            }
+        }
+
+        // Click inside notch → expand (global: clicks in other windows)
+        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
+            guard let self else { return }
+            let mouse = NSEvent.mouseLocation
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.handleClick(at: mouse)
+            }
+        }
+
+        // Local: clicks on our own panel
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            guard let self else { return event }
+            let mouse = NSEvent.mouseLocation
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.handleClick(at: mouse)
+            }
+            return event
+        }
+    }
+
+    private func handleClick(at mouse: CGPoint) {
+        if vm.isRenamingView {
+            if contains(vm.renameViewFieldScreenRect, mouse) {
+                return
+            }
+
+            vm.isRenamingView = false
+            vm.isPinned = false
+            return
+        }
+
+        if !vm.isExpanded && contains(notchRect, mouse) {
+            notchPanel?.alphaValue = 1
+            vm.clicked()
+        } else if vm.isExpanded && !contains(expandedRect, mouse) {
+            vm.mouseExited()
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(500))
+                guard let self, !self.vm.isExpanded else { return }
+                self.notchPanel?.alphaValue = 0
             }
         }
     }

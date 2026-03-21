@@ -2,24 +2,43 @@ import AppKit
 import SwiftUI
 
 class NotchPanel: NSPanel {
-    init(contentRect: NSRect, level windowLevel: NSWindow.Level) {
+    enum Kind {
+        case blur
+        case content
+    }
+
+    let kind: Kind
+
+    init(contentRect: NSRect, level windowLevel: NSWindow.Level, kind: Kind) {
+        self.kind = kind
         super.init(
             contentRect: contentRect,
-            styleMask: [.borderless, .nonactivatingPanel],
+            styleMask: [.borderless, .nonactivatingPanel, .utilityWindow, .hudWindow],
             backing: .buffered,
             defer: false
         )
+        isFloatingPanel = true
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
         level = windowLevel
-        collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
-        isMovableByWindowBackground = false
-        ignoresMouseEvents = true
+        isMovable = false
+        isReleasedWhenClosed = false
+        collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        appearance = NSAppearance(named: .darkAqua)
+        becomesKeyOnlyIfNeeded = true
     }
 
-    override var canBecomeKey: Bool { false }
+    var needsKeyInput = false
+
+    override var canBecomeKey: Bool { needsKeyInput }
     override var canBecomeMain: Bool { false }
+
+    static var contentPanel: NotchPanel? {
+        NSApp.windows
+            .compactMap { $0 as? NotchPanel }
+            .first { $0.kind == .content }
+    }
 
     func setView<V: View>(_ view: V) {
         let hosting = FixedHostingView(rootView: view)

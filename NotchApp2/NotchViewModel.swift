@@ -6,17 +6,25 @@ final class NotchViewModel {
     var isMouseInside = false
     var isElevated = false
     var isQuickPeeking = false
+    var isExpanded = false
+    var isPinned = false  // prevents auto-collapse (dropdown open, pin button, etc.)
+    var isRenamingView = false
+    var renameViewName = ""
+    var renameViewFieldScreenRect: CGRect = .zero
 
     var notchWidth: CGFloat = 0
     var notchHeight: CGFloat = 0
+    let viewManager = ViewManager()
+
+    // Expanded panel dimensions
+    var screenWidth: CGFloat = 0
+    var expandedWidth: CGFloat { screenWidth * 0.54 }
+    var expandedHeight: CGFloat { 300 }
 
     private let log = FileLog()
     private var elevateTask: Task<Void, Never>?
     private var collapseTask: Task<Void, Never>?
 
-    // Ghidra-confirmed spring: response=0.35, bounce varies by state
-    // Ghidra-confirmed: response=0.35, bounce=0.05 (peek) / 0.45 (elevate)
-    // bounce maps to dampingRatio via: dampingRatio = 1 - bounce
     private static let peekAnim: Animation = .interpolatingSpring(
         duration: 0.35, bounce: 0.05
     )
@@ -49,14 +57,33 @@ final class NotchViewModel {
         elevateTask?.cancel()
         isMouseInside = false
 
+        guard !isPinned else { return }
+
         collapseTask?.cancel()
         collapseTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(100))
-            guard !Task.isCancelled else { return }
-            withAnimation(Self.elevateAnim) {
-                isQuickPeeking = false
-                isElevated = false
-            }
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled, !isPinned, !isMouseInside else { return }
+            collapse()
+        }
+    }
+
+    func clicked() {
+        log.write("VM: clicked, expanding")
+        collapseTask?.cancel()
+        withAnimation(Self.peekAnim) {
+            isExpanded = true
+            isElevated = true
+            isQuickPeeking = true
+        }
+    }
+
+    func collapse() {
+        log.write("VM: collapsing")
+        withAnimation(Self.elevateAnim) {
+            isExpanded = false
+            isQuickPeeking = false
+            isElevated = false
+            isPinned = false
         }
     }
 }
