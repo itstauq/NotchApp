@@ -92,7 +92,11 @@ struct NotchContentView: View {
                             tint: Color(red: 0.39, green: 0.68, blue: 0.98),
                             isActive: vm.isEditingLayout
                         ) {
-                            vm.toggleEditMode()
+                            if vm.isEditingLayout {
+                                vm.saveEditMode()
+                            } else {
+                                vm.toggleEditMode()
+                            }
                         }
 
                         HeaderAccessoryButton(
