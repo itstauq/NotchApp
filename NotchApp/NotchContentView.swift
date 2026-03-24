@@ -158,7 +158,15 @@ private struct WidgetLayoutRow: View {
             }
 
             ZStack(alignment: .topLeading) {
-                if vm.isEditingLayout, remainingColumns > 0 {
+                if let validatedLayout, validatedLayout.layout.widgets.isEmpty {
+                    EmptyWidgetState(vm: vm, isEditing: vm.isEditingLayout)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+
+                if vm.isEditingLayout,
+                   remainingColumns > 0,
+                   let validatedLayout,
+                   !validatedLayout.layout.widgets.isEmpty {
                     EmptySlotMenu(vm: vm, column: usedColumns)
                         .frame(
                             width: trailingAreaWidth(remainingColumns: remainingColumns, slotWidth: slotWidth),
@@ -180,7 +188,8 @@ private struct WidgetLayoutRow: View {
                             vm: vm,
                             isEditing: vm.isEditingLayout,
                             isHeld: isHeld,
-                            availableSpans: vm.viewManager.availableSpans(for: widget.id),
+                            minSpan: widget.kind.minSpan,
+                            maxSpan: widget.kind.maxSpan,
                             canSetSpan: { span in
                                 vm.viewManager.canSetSpan(span, for: widget.id)
                             },
@@ -325,12 +334,59 @@ private struct EmptySlotMenu: View {
     }
 }
 
+private struct EmptyWidgetState: View {
+    var vm: NotchViewModel
+    var isEditing: Bool
+
+    var body: some View {
+        let content = VStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.white.opacity(0.04))
+                .frame(width: 54, height: 54)
+                .overlay {
+                    Image(systemName: isEditing ? "plus.square.on.square" : "square.grid.3x3.middle.filled")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+
+            Text(isEditing ? "Add your first widget" : "This view is empty")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.9))
+
+            Text(isEditing ? "Click anywhere to add your first widget." : "Enter edit mode to add widgets here.")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.42))
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+        if isEditing {
+            Menu {
+                ForEach(WidgetKind.allCases) { kind in
+                    Button {
+                        vm.viewManager.addWidget(kind, at: 0)
+                    } label: {
+                        Label(kind.title, systemImage: kind.icon)
+                    }
+                }
+            } label: {
+                content
+                    .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        } else {
+            content
+        }
+    }
+}
+
 private struct WidgetCard: View {
     var widget: WidgetInstance
     var vm: NotchViewModel
     var isEditing: Bool
     var isHeld: Bool
-    var availableSpans: [Int]
+    var minSpan: Int
+    var maxSpan: Int
     var canSetSpan: (Int) -> Bool
     var onSetSpan: (Int) -> Void
     var onRemove: () -> Void
@@ -341,7 +397,7 @@ private struct WidgetCard: View {
         let tint = widget.kind.tint
         let cardShape = RoundedRectangle(cornerRadius: 18, style: .continuous)
 
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 10) {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(tint.opacity(0.18))
@@ -362,24 +418,13 @@ private struct WidgetCard: View {
                 }
 
                 Spacer(minLength: 0)
-
-                if widget.kind == .notes {
-                    Circle()
-                        .fill(.white.opacity(0.06))
-                        .frame(width: 28, height: 28)
-                        .overlay {
-                            Image(systemName: "plus")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.white.opacity(0.72))
-                        }
-                }
             }
 
             widgetPreview(for: widget.kind, tint: tint)
         }
         .blur(radius: isEditing ? 1.4 : 0)
         .padding(.horizontal, 14)
-        .padding(.vertical, 14)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
             cardShape
@@ -423,7 +468,7 @@ private struct WidgetCard: View {
                     .allowsHitTesting(false)
             }
         }
-        .overlay(alignment: .topTrailing) {
+        .overlay(alignment: .topLeading) {
             if isEditing {
                 HStack(spacing: 6) {
                     editControlButton(
@@ -440,28 +485,33 @@ private struct WidgetCard: View {
                         action: grow
                     )
 
-                    editControlButton(
-                        systemName: "trash",
-                        tint: Color(red: 0.98, green: 0.39, blue: 0.43),
-                        isEnabled: true,
-                        action: onRemove
-                    )
                 }
+                .padding(10)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if isEditing {
+                editControlButton(
+                    systemName: "trash",
+                    tint: Color(red: 0.98, green: 0.39, blue: 0.43),
+                    isEnabled: true,
+                    action: onRemove
+                )
                 .padding(10)
             }
         }
     }
 
-    private var sortedSpans: [Int] {
-        availableSpans.sorted()
-    }
-
     private var smallerSpan: Int? {
-        sortedSpans.last(where: { $0 < widget.span })
+        let candidate = widget.span - 1
+        guard candidate >= minSpan else { return nil }
+        return candidate
     }
 
     private var largerSpan: Int? {
-        sortedSpans.first(where: { $0 > widget.span })
+        let candidate = widget.span + 1
+        guard candidate <= maxSpan else { return nil }
+        return candidate
     }
 
     private var canShrink: Bool {
@@ -508,516 +558,94 @@ private struct WidgetCard: View {
     @ViewBuilder
     private func widgetPreview(for kind: WidgetKind, tint: Color) -> some View {
         switch kind {
-        case .inbox:
-            VStack(alignment: .leading, spacing: 10) {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(.white.opacity(0.07))
-                    .frame(height: 40)
-                    .overlay {
-                        HStack(spacing: 4) {
-                            Text("Press ↵ to capture another item")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.48))
-                                .lineLimit(1)
+        case .mockAlpha:
+            mockWidgetSurface(
+                tint: tint,
+                accent: .white.opacity(0.86),
+                bars: [0.68, 0.42, 0.82]
+            )
+        case .mockBeta:
+            mockWidgetSurface(
+                tint: tint,
+                accent: tint.opacity(0.92),
+                bars: [0.34, 0.76, 0.58]
+            )
+        case .mockGamma:
+            mockWidgetSurface(
+                tint: tint,
+                accent: .white.opacity(0.72),
+                bars: [0.56, 0.28, 0.88]
+            )
+        case .mockDelta:
+            mockWidgetSurface(
+                tint: tint,
+                accent: tint.opacity(0.9),
+                bars: [0.78, 0.5, 0.32]
+            )
+        case .mockEpsilon:
+            mockWidgetSurface(
+                tint: tint,
+                accent: .white.opacity(0.82),
+                bars: [0.24, 0.64, 0.92]
+            )
+        case .mockPhi:
+            mockWidgetSurface(
+                tint: tint,
+                accent: tint.opacity(0.88),
+                bars: [0.72, 0.22, 0.46]
+            )
+        case .mockGammaAlt:
+            mockWidgetSurface(
+                tint: tint,
+                accent: .white.opacity(0.74),
+                bars: [0.44, 0.84, 0.6]
+            )
+        }
+    }
 
-                            Spacer(minLength: 0)
-
-                            Circle()
-                                .fill(.white.opacity(0.08))
-                                .frame(width: 24, height: 24)
-                                .overlay {
-                                    Image(systemName: "mic")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(.white.opacity(0.72))
-                                }
-                        }
-                        .padding(.horizontal, 8)
-                    }
-
-                captureItemRow(
-                    title: "Potential whitespace bug in tab rename field",
-                    isChecked: false
-                )
-
-                captureItemRow(
-                    title: "Pick up oat milk on the way home",
-                    isChecked: true
-                )
-            }
-        case .pomodoro:
-            VStack(spacing: 20) {
-                HStack(spacing: 8) {
-                    Text("Cycle 2 of 4")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.42))
-
-                    HStack(spacing: 4) {
-                        ForEach(0..<4, id: \.self) { index in
-                            Circle()
-                                .fill(index < 2 ? tint : .white.opacity(0.12))
-                                .frame(width: 6, height: 6)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity)
-
-                Text("25:00")
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.94))
-                    .frame(maxWidth: .infinity)
-
-                HStack(spacing: 10) {
-                    RoundedRectangle(cornerRadius: 999, style: .continuous)
-                        .fill(tint)
-                        .frame(width: 68, height: 34)
-                        .overlay {
-                            Text("Start")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.black.opacity(0.76))
-                        }
-
-                    pomodoroActionButton("arrow.counterclockwise")
-                    pomodoroActionButton("gearshape.fill")
-                }
-                .frame(maxWidth: .infinity)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        case .calendar:
-            VStack(alignment: .leading, spacing: 10) {
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 0) {
-                        scheduleRow(time: "9:00", meridiem: "AM", color: Color(red: 0.28, green: 0.58, blue: 0.98), title: "Morning Standup", meta: "Zoom · Engineering")
-                        Divider().background(.white.opacity(0.08))
-                        scheduleRow(time: "10:30", meridiem: "AM", color: Color(red: 0.72, green: 0.36, blue: 0.98), title: "Design Review", meta: "Figma · Product")
-                        Divider().background(.white.opacity(0.08))
-                        scheduleRow(time: "1:00", meridiem: "PM", color: Color(red: 0.2, green: 0.82, blue: 0.46), title: "1:1 with Sarah", meta: "Office · Mgmt")
-                        Divider().background(.white.opacity(0.08))
-                        scheduleRow(time: "3:30", meridiem: "PM", color: Color(red: 0.99, green: 0.48, blue: 0.18), title: "Sprint Planning", meta: "Slack Huddle · Team")
-                    }
-                    .padding(.top, 2)
-                    .padding(.bottom, 18)
-                }
-                .frame(maxHeight: .infinity, alignment: .top)
-                .mask(alignment: .bottom) {
-                    LinearGradient(
-                        stops: [
-                            .init(color: .black, location: 0),
-                            .init(color: .black, location: 0.82),
-                            .init(color: .clear, location: 1)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                }
-            }
-            .frame(maxHeight: .infinity, alignment: .top)
-        case .cameraPreview:
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.black.opacity(0.18))
+    private func mockWidgetSurface(tint: Color, accent: Color, bars: [CGFloat]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(tint.opacity(0.16))
+                .frame(height: 62)
                 .overlay {
-                    ZStack {
+                    ZStack(alignment: .topLeading) {
                         LinearGradient(
                             colors: [
-                                Color(red: 0.25, green: 0.28, blue: 0.34),
-                                Color(red: 0.18, green: 0.2, blue: 0.26),
-                                Color(red: 0.12, green: 0.14, blue: 0.19)
+                                tint.opacity(0.34),
+                                tint.opacity(0.12),
+                                .clear
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
 
-                        RadialGradient(
-                            colors: [
-                                Color.white.opacity(0.14),
-                                Color.white.opacity(0.03),
-                                .clear
-                            ],
-                            center: .topTrailing,
-                            startRadius: 12,
-                            endRadius: 180
-                        )
-
-                        LinearGradient(
-                            colors: [
-                                tint.opacity(0.2),
-                                .clear,
-                                Color.black.opacity(0.22)
-                            ],
-                            startPoint: .bottomLeading,
-                            endPoint: .topTrailing
-                        )
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                }
-                .overlay(alignment: .topTrailing) {
-                    cameraOverlayBadge("gearshape.fill")
-                        .padding(12)
-                }
-                .overlay(alignment: .bottomTrailing) {
-                    cameraOverlayBadge("photo.badge.plus")
-                        .padding(12)
-                }
-                .overlay(alignment: .bottomLeading) {
-                    cameraOverlayBadge("waveform")
-                        .padding(12)
-                }
-        case .ambientSounds:
-            VStack(spacing: 8) {
-                HStack(spacing: 8) {
-                    ambientSoundTile(title: "Rain", icon: "cloud.rain.fill", step: 4, selected: true, tint: tint)
-                    ambientSoundTile(title: "Fire", icon: "flame.fill", step: 1, selected: false, tint: tint)
-                    ambientSoundTile(title: "Waves", icon: "water.waves", step: 1, selected: false, tint: tint)
-                }
-
-                HStack(spacing: 8) {
-                    ambientSoundTile(title: "Forest", icon: "leaf.fill", step: 1, selected: false, tint: tint)
-                    ambientSoundTile(title: "Cafe", icon: "cup.and.saucer.fill", step: 3, selected: true, tint: tint)
-                    ambientSoundTile(title: "Lo-fi", icon: "music.note.list", step: 2, selected: true, tint: tint)
-                }
-            }
-        case .music:
-            VStack(alignment: .leading, spacing: 12) {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(tint.opacity(0.18))
-                    .frame(height: 94)
-                    .overlay {
-                        VStack(spacing: 8) {
-                            Image(systemName: "music.note")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(tint)
-                            Text("After Hours")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.88))
-                        }
-                    }
-
-                HStack(spacing: 12) {
-                    ForEach(["backward.fill", "play.fill", "forward.fill"], id: \.self) { symbol in
-                        Circle()
-                            .fill(symbol == "play.fill" ? tint : .white.opacity(0.08))
-                            .frame(width: symbol == "play.fill" ? 36 : 28, height: symbol == "play.fill" ? 36 : 28)
-                            .overlay {
-                                Image(systemName: symbol)
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundStyle(symbol == "play.fill" ? .black.opacity(0.75) : .white.opacity(0.72))
-                            }
+                        RoundedRectangle(cornerRadius: 999, style: .continuous)
+                            .fill(.white.opacity(0.08))
+                            .frame(width: 42, height: 8)
+                            .padding(8)
                     }
                 }
-                .frame(maxWidth: .infinity)
-            }
-        case .notes:
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 10) {
-                    noteCard("Repair shop address: 512 W 48th St, New York...", time: "16:46", tint: tint)
-                    noteCard("Need to confirm invite flow before shipping onboarding polish.", time: "14:18", tint: tint)
-                    noteCard("Try a calmer hover treatment on the tab strip glass.", time: "09:32", tint: tint)
-                }
-                .padding(.bottom, 18)
-            }
-            .frame(maxHeight: .infinity, alignment: .top)
-            .mask(alignment: .bottom) {
-                LinearGradient(
-                    stops: [
-                        .init(color: .black, location: 0),
-                        .init(color: .black, location: 0.82),
-                        .init(color: .clear, location: 1)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
-        case .linear:
-            VStack(alignment: .leading, spacing: 8) {
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 8) {
-                        issueRow(id: "LIN-142", title: "Refine widget host row", status: "In Progress", priority: 3)
-                        issueRow(id: "LIN-151", title: "Add edit mode affordances", status: "To Do", priority: 2)
-                        issueRow(id: "LIN-159", title: "Ship preview gallery", status: "Done", priority: 1)
-                        issueRow(id: "LIN-164", title: "Fix tab-strip overflow edge case", status: "To Do", priority: 2)
-                        issueRow(id: "LIN-171", title: "Polish capture empty state", status: "In Progress", priority: 3)
-                        issueRow(id: "LIN-176", title: "Audit widget height constraints", status: "Done", priority: 1)
-                    }
-                    .padding(.bottom, 28)
-                }
-                .frame(maxHeight: .infinity, alignment: .top)
-                .mask(alignment: .bottom) {
-                    LinearGradient(
-                        stops: [
-                            .init(color: .black, location: 0),
-                            .init(color: .black, location: 0.74),
-                            .init(color: .clear, location: 1)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                }
-            }
-        case .gmail:
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("5 unread")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.82))
-                    Spacer(minLength: 0)
-                    Image(systemName: "square.and.pencil")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.48))
-                }
 
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 8) {
-                        mailRow(sender: "Design", subject: "Review notes", avatar: "D", tint: Color(red: 0.99, green: 0.68, blue: 0.35))
-                        mailRow(sender: "Linear", subject: "3 issues assigned", avatar: "L", tint: Color(red: 0.72, green: 0.58, blue: 0.98))
-                        mailRow(sender: "Figma", subject: "Updated prototype ready", avatar: "F", tint: Color(red: 0.39, green: 0.68, blue: 0.98))
-                    }
-                    .padding(.bottom, 18)
-                }
-                .frame(maxHeight: .infinity, alignment: .top)
-                .mask(alignment: .bottom) {
-                    LinearGradient(
-                        stops: [
-                            .init(color: .black, location: 0),
-                            .init(color: .black, location: 0.82),
-                            .init(color: .clear, location: 1)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(Array(bars.enumerated()), id: \.offset) { index, width in
+                    RoundedRectangle(cornerRadius: 999, style: .continuous)
+                        .fill(index == 0 ? accent : .white.opacity(0.1))
+                        .frame(width: 54 * width, height: 6)
                 }
             }
-            .frame(maxHeight: .infinity, alignment: .top)
-        }
-    }
-
-    private func issueRow(id: String, title: String, status: String, priority: Int) -> some View {
-            HStack(alignment: .center, spacing: 8) {
-            priorityBars(level: priority)
-
-            Text(id)
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.42))
-
-            Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.82))
-                .lineLimit(1)
 
             Spacer(minLength: 0)
 
             HStack(spacing: 6) {
-                Text(status)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.76))
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.42))
-            }
-            .padding(.horizontal, 8)
-            .frame(height: 24)
-            .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private func priorityBars(level: Int) -> some View {
-        HStack(alignment: .bottom, spacing: 2) {
-            ForEach(0..<3, id: \.self) { index in
-                RoundedRectangle(cornerRadius: 999, style: .continuous)
-                    .fill(index < level ? .white.opacity(0.78) : .white.opacity(0.18))
-                    .frame(width: 4, height: CGFloat(8 + (index * 4)))
-            }
-        }
-        .frame(width: 18, alignment: .leading)
-    }
-
-    private func scheduleRow(time: String, meridiem: String, color: Color, title: String, meta: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(time)
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.84))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.9)
-                Text(meridiem)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.34))
-            }
-            .frame(width: 38, alignment: .trailing)
-
-            RoundedRectangle(cornerRadius: 999, style: .continuous)
-                .fill(color)
-                .frame(width: 4, height: 38)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .lineLimit(1)
-                Text(meta)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.4))
-                    .lineLimit(1)
+                ForEach(0..<3, id: \.self) { index in
+                    Circle()
+                        .fill(index == 1 ? tint : .white.opacity(0.08))
+                        .frame(width: index == 1 ? 22 : 16, height: index == 1 ? 22 : 16)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 8)
-    }
-
-    private func mailRow(sender: String, subject: String, avatar: String, tint: Color) -> some View {
-        HStack(alignment: .center, spacing: 10) {
-            Circle()
-                .fill(tint.opacity(0.18))
-                .frame(width: 28, height: 28)
-                .overlay {
-                    Text(avatar)
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(tint)
-                }
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
-                    Text(sender)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.86))
-                    Spacer(minLength: 0)
-                    Circle()
-                        .fill(Color.red.opacity(0.92))
-                        .frame(width: 6, height: 6)
-                }
-
-                Text(subject)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.54))
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private func noteCard(_ text: String, time: String, tint: Color) -> some View {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(tint.opacity(0.08))
-            .overlay(alignment: .topLeading) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(text)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.84))
-                        .lineLimit(3)
-                        .multilineTextAlignment(.leading)
-
-                    Text(time)
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.34))
-                }
-                .padding(12)
-            }
-            .frame(height: 104)
-    }
-
-    private func captureItemRow(title: String, isChecked: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(.white.opacity(0.05))
-            .frame(height: 34)
-            .overlay {
-                HStack(spacing: 8) {
-                    Circle()
-                        .strokeBorder(.white.opacity(isChecked ? 0.12 : 0.28), lineWidth: 1.2)
-                        .frame(width: 14, height: 14)
-                        .overlay {
-                            if isChecked {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundStyle(.white.opacity(0.72))
-                            }
-                        }
-
-                    Text(title)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(isChecked ? 0.42 : 0.72))
-                        .strikethrough(isChecked, color: .white.opacity(0.28))
-                        .lineLimit(1)
-
-                    Spacer(minLength: 0)
-
-                    Image(systemName: "trash")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white.opacity(isChecked ? 0.26 : 0.42))
-                }
-                .padding(.horizontal, 10)
-            }
-    }
-
-    private func pomodoroModeChip(_ title: String, selected: Bool, tint: Color) -> some View {
-        Text(title)
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(selected ? .black.opacity(0.78) : .white.opacity(0.76))
-            .padding(.horizontal, 10)
-            .frame(height: 28)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(selected ? Color.white.opacity(0.92) : .white.opacity(0.06))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .strokeBorder(selected ? .clear : .white.opacity(0.12), lineWidth: 1)
-            )
-    }
-
-    private func pomodoroActionButton(_ symbol: String) -> some View {
-        RoundedRectangle(cornerRadius: 999, style: .continuous)
-            .fill(.white.opacity(0.06))
-            .frame(width: 34, height: 34)
-            .overlay {
-                Image(systemName: symbol)
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.8))
-            }
-    }
-
-    private func cameraOverlayBadge(_ symbol: String) -> some View {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(.black.opacity(0.28))
-            .frame(width: 28, height: 24)
-            .overlay {
-                Image(systemName: symbol)
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.82))
-            }
-    }
-
-    private func ambientSoundTile(title: String, icon: String, step: Int, selected: Bool, tint: Color) -> some View {
-        VStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(selected ? tint : .white.opacity(0.56))
-
-            Text(title)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(selected ? 0.88 : 0.56))
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-
-            HStack(alignment: .bottom, spacing: 3) {
-                ForEach(0..<4, id: \.self) { index in
-                    RoundedRectangle(cornerRadius: 999, style: .continuous)
-                        .fill(index < step ? (selected ? tint : .white.opacity(0.32)) : .white.opacity(0.08))
-                        .frame(width: 8, height: 3 + (CGFloat(index) * 2.5))
-                }
-            }
-            .frame(height: 10)
-        }
-        .frame(maxWidth: .infinity, minHeight: 56)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(selected ? tint.opacity(0.14) : .white.opacity(0.04))
-        )
     }
 }
 

@@ -24,90 +24,72 @@ struct SavedView: Identifiable, Codable, Equatable {
 }
 
 enum WidgetKind: String, CaseIterable, Codable, Identifiable {
-    case inbox
-    case pomodoro
-    case calendar
-    case cameraPreview
-    case ambientSounds
-    case music
-    case notes
-    case linear
-    case gmail
+    case mockAlpha
+    case mockBeta
+    case mockGamma
+    case mockDelta
+    case mockEpsilon
+    case mockPhi
+    case mockGammaAlt
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .inbox: "Capture"
-        case .pomodoro: "Pomodoro"
-        case .calendar: "Calendar"
-        case .cameraPreview: "Camera Preview"
-        case .ambientSounds: "Ambient Sounds"
-        case .music: "Music"
-        case .notes: "Notes"
-        case .linear: "Linear"
-        case .gmail: "Gmail"
+        case .mockAlpha: "Mock Widget A"
+        case .mockBeta: "Mock Widget B"
+        case .mockGamma: "Mock Widget C"
+        case .mockDelta: "Mock Widget D"
+        case .mockEpsilon: "Mock Widget E"
+        case .mockPhi: "Mock Widget F"
+        case .mockGammaAlt: "Mock Widget G"
         }
     }
 
     var icon: String {
         switch self {
-        case .inbox: "square.and.pencil"
-        case .pomodoro: "timer"
-        case .calendar: "calendar"
-        case .cameraPreview: "camera.fill"
-        case .ambientSounds: "speaker.wave.2.fill"
-        case .music: "music.note"
-        case .notes: "note.text"
-        case .linear: "point.3.connected.trianglepath.dotted"
-        case .gmail: "envelope.fill"
+        case .mockAlpha: "square.grid.2x2.fill"
+        case .mockBeta: "rectangle.3.group.fill"
+        case .mockGamma: "sparkles.rectangle.stack"
+        case .mockDelta: "waveform.path.ecg.rectangle.fill"
+        case .mockEpsilon: "slider.horizontal.3"
+        case .mockPhi: "hexagon.grid.fill"
+        case .mockGammaAlt: "circle.hexagongrid.fill"
         }
     }
 
     var caption: String {
         switch self {
-        case .inbox: "Quick capture"
-        case .pomodoro: "Focus timer"
-        case .calendar: "Today's Schedule"
-        case .cameraPreview: "Mirror preview"
-        case .ambientSounds: "Focus atmosphere"
-        case .music: "Now playing"
-        case .notes: "Scratchpad"
-        case .linear: "Assigned issues"
-        case .gmail: "Unread triage"
+        case .mockAlpha, .mockBeta, .mockGamma, .mockDelta, .mockEpsilon, .mockPhi, .mockGammaAlt: "Mock preview"
         }
     }
 
     var tint: Color {
         switch self {
-        case .inbox: Color(red: 0.98, green: 0.46, blue: 0.48)
-        case .pomodoro: Color(red: 0.99, green: 0.68, blue: 0.35)
-        case .calendar: Color(red: 0.39, green: 0.68, blue: 0.98)
-        case .cameraPreview: Color(red: 0.56, green: 0.68, blue: 0.96)
-        case .ambientSounds: Color(red: 0.46, green: 0.82, blue: 0.72)
-        case .music: Color(red: 0.69, green: 0.54, blue: 0.98)
-        case .notes: Color(red: 0.54, green: 0.76, blue: 0.98)
-        case .linear: Color(red: 0.72, green: 0.58, blue: 0.98)
-        case .gmail: Color(red: 0.96, green: 0.46, blue: 0.48)
+        case .mockAlpha: Color(red: 0.46, green: 0.68, blue: 0.98)
+        case .mockBeta: Color(red: 0.99, green: 0.64, blue: 0.38)
+        case .mockGamma: Color(red: 0.72, green: 0.58, blue: 0.98)
+        case .mockDelta: Color(red: 0.37, green: 0.86, blue: 0.72)
+        case .mockEpsilon: Color(red: 0.96, green: 0.78, blue: 0.35)
+        case .mockPhi: Color(red: 0.98, green: 0.5, blue: 0.63)
+        case .mockGammaAlt: Color(red: 0.52, green: 0.88, blue: 0.96)
+        }
+    }
+
+    var minSpan: Int {
+        switch self {
+        case .mockAlpha, .mockBeta, .mockGamma, .mockDelta, .mockEpsilon, .mockPhi, .mockGammaAlt: 3
+        }
+    }
+
+    var maxSpan: Int {
+        switch self {
+        case .mockAlpha, .mockBeta, .mockGamma, .mockDelta, .mockEpsilon, .mockPhi, .mockGammaAlt: 12
         }
     }
 
     var supportedSpans: [Int] {
-        switch self {
-        case .inbox: [3, 5, 6]
-        case .pomodoro: [3, 4, 6, 9]
-        case .calendar: [3, 6]
-        case .cameraPreview: [3, 4, 6, 9]
-        case .ambientSounds: [3, 4, 6]
-        case .music: [3]
-        case .notes: [3, 4, 6]
-        case .linear: [3, 6]
-        case .gmail: [3, 6]
-        }
-    }
-
-    var defaultSpan: Int {
-        supportedSpans.first ?? 1
+        Array(minSpan...maxSpan)
     }
 }
 
@@ -241,9 +223,9 @@ final class ViewManager {
         guard let targetView else { return }
         var layout = Self.normalizedPackedLayout(for: layout(for: targetView))
         let usedColumns = Self.totalUsedColumns(in: layout)
-        guard usedColumns + kind.defaultSpan <= ViewLayout.columnCount else { return }
+        guard usedColumns + kind.minSpan <= ViewLayout.columnCount else { return }
 
-        let widget = WidgetInstance(kind: kind, startColumn: usedColumns, span: kind.defaultSpan)
+        let widget = WidgetInstance(kind: kind, startColumn: usedColumns, span: kind.minSpan)
         layout.widgets.append(widget)
         setLayout(Self.packedLayout(for: layout.widgets), for: targetView)
     }
@@ -308,7 +290,7 @@ final class ViewManager {
         layout = Self.normalizedPackedLayout(for: layout)
 
         let widget = layout.widgets[index]
-        guard widget.kind.supportedSpans.contains(span) else { return nil }
+        guard span >= widget.kind.minSpan, span <= widget.kind.maxSpan else { return nil }
 
         if span == widget.span {
             return Self.validate(layout: Self.packedLayout(for: layout.widgets))
@@ -399,7 +381,7 @@ final class ViewManager {
         var occupancy = Array<UUID?>(repeating: nil, count: ViewLayout.columnCount)
 
         for widget in layout.widgets {
-            guard widget.kind.supportedSpans.contains(widget.span) else { return nil }
+            guard widget.span >= widget.kind.minSpan, widget.span <= widget.kind.maxSpan else { return nil }
             guard widget.startColumn >= 0 else { return nil }
             let endColumn = widget.startColumn + widget.span
             guard endColumn <= ViewLayout.columnCount else { return nil }
@@ -424,7 +406,7 @@ final class ViewManager {
 
         for widgetID in prioritized {
             guard let index = repaired.widgets.firstIndex(where: { $0.id == widgetID }) else { continue }
-            let supported = repaired.widgets[index].kind.supportedSpans.filter { $0 <= repaired.widgets[index].span }.sorted(by: >)
+            let supported = Array(repaired.widgets[index].kind.minSpan...repaired.widgets[index].span).sorted(by: >)
 
             for span in supported {
                 repaired.widgets[index].span = span
@@ -460,21 +442,21 @@ final class ViewManager {
         switch view.id {
         case SavedView.homeID:
             return ViewLayout(widgets: [
-                WidgetInstance(kind: .inbox, startColumn: 0, span: 5),
-                WidgetInstance(kind: .cameraPreview, startColumn: 5, span: 4),
-                WidgetInstance(kind: .music, startColumn: 9, span: 3),
+                WidgetInstance(kind: .mockAlpha, startColumn: 0, span: 4),
+                WidgetInstance(kind: .mockBeta, startColumn: 4, span: 4),
+                WidgetInstance(kind: .mockGamma, startColumn: 8, span: 4),
             ])
         case SavedView.focusID:
             return ViewLayout(widgets: [
-                WidgetInstance(kind: .pomodoro, startColumn: 0, span: 4),
-                WidgetInstance(kind: .notes, startColumn: 4, span: 4),
-                WidgetInstance(kind: .ambientSounds, startColumn: 8, span: 4),
+                WidgetInstance(kind: .mockAlpha, startColumn: 0, span: 3),
+                WidgetInstance(kind: .mockDelta, startColumn: 3, span: 6),
+                WidgetInstance(kind: .mockEpsilon, startColumn: 9, span: 3),
             ])
         case SavedView.planID:
             return ViewLayout(widgets: [
-                WidgetInstance(kind: .linear, startColumn: 0, span: 6),
-                WidgetInstance(kind: .calendar, startColumn: 6, span: 3),
-                WidgetInstance(kind: .gmail, startColumn: 9, span: 3),
+                WidgetInstance(kind: .mockPhi, startColumn: 0, span: 5),
+                WidgetInstance(kind: .mockEpsilon, startColumn: 5, span: 3),
+                WidgetInstance(kind: .mockGammaAlt, startColumn: 8, span: 4),
             ])
         default:
             return ViewLayout()
