@@ -282,6 +282,9 @@ struct ViewSwitcher: View {
     private var addButton: some View {
         Button {
             viewManager.addView(name: "New View")
+            if !vm.isEditingLayout {
+                vm.toggleEditMode()
+            }
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 10, weight: .bold))
@@ -488,9 +491,4 @@ private struct TabFramePreferenceKey: PreferenceKey {
     static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
         value.merge(nextValue(), uniquingKeysWith: { _, new in new })
     }
-}
-
-private enum MoveDirection {
-    case left
-    case right
 }
