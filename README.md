@@ -2,12 +2,24 @@
 
 NotchApp is a productivity app that turns your MacBook notch into an always-available widget hub.
 
+https://github.com/user-attachments/assets/8f011a49-6c6f-4cc4-b100-5430d12cd2ae
+
 ## Features
 
 - expand the notch into a larger interactive surface
 - create multiple views and organize widgets across them
-- choose from a carefully crafted set of built-in widgets
+- choose from a carefully crafted set of built-in widgets (coming soon)
 - build your own using a Raycast-inspired extensions API (coming soon)
+
+## Planned Widgets
+
+These are some of the built-in widgets currently planned for v1.
+
+- **Home:** Quick Capture, Camera Preview, Music
+- **Focus:** Pomodoro, Notes, Ambient Sounds
+- **Plan:** Linear, Calendar, Gmail
+
+![mock-widgets](https://github.com/user-attachments/assets/43825158-46d0-4da9-ab8f-b1b5ab1bd501)
 
 ## Requirements
 
