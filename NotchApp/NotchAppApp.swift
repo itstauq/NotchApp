@@ -13,6 +13,7 @@ struct NotchAppApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let logger = FileLog()
+    private let keepsCollapsedNotchVisibleForDemo = false
     private var moveMonitor: Any?
     private var clickMonitor: Any?
     private var localClickMonitor: Any?
@@ -80,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             kind: .blur
         )
         blur.setView(NotchBlurView(vm: vm))
-        blur.alphaValue = 0
+        blur.alphaValue = keepsCollapsedNotchVisibleForDemo ? 1 : 0
         blur.orderFrontRegardless()
         blurPanel = blur
 
@@ -91,7 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             kind: .content
         )
         panel.setView(NotchContentView(vm: vm))
-        panel.alphaValue = 0
+        panel.alphaValue = 1
         panel.orderFrontRegardless()
         notchPanel = panel
     }
@@ -117,6 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if inside != vm.isMouseInside {
                     if inside {
                         notchPanel?.alphaValue = 1
+                        blurPanel?.alphaValue = 1
                         vm.mouseEntered()
                     } else {
                         vm.mouseExited()
@@ -124,7 +126,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         Task { @MainActor [weak self] in
                             try? await Task.sleep(for: .milliseconds(500))
                             guard let self, !self.vm.isMouseInside, !self.vm.isExpanded else { return }
-                            self.notchPanel?.alphaValue = 0
+                            if !self.keepsCollapsedNotchVisibleForDemo {
+                                self.notchPanel?.alphaValue = 0
+                                self.blurPanel?.alphaValue = 0
+                            }
                         }
                     }
                 }
@@ -170,13 +175,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if !vm.isExpanded && contains(notchRect, mouse) {
             notchPanel?.alphaValue = 1
+            blurPanel?.alphaValue = 1
             vm.clicked()
         } else if vm.isExpanded && !contains(expandedRect, mouse) {
             vm.mouseExited()
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .milliseconds(500))
                 guard let self, !self.vm.isExpanded else { return }
-                self.notchPanel?.alphaValue = 0
+                if !self.keepsCollapsedNotchVisibleForDemo {
+                    self.notchPanel?.alphaValue = 0
+                    self.blurPanel?.alphaValue = 0
+                }
             }
         }
     }
