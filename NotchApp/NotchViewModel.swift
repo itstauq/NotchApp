@@ -16,28 +16,70 @@ struct RuntimeRenderNode: Codable, Equatable, Identifiable {
     var type: String
     var direction: String?
     var spacing: Double?
+    var role: String?
+    var tone: String?
     var text: String?
     var title: String?
     var action: String?
+    var symbol: String?
+    var payload: RuntimeActionPayload?
+    var checked: Bool?
+    var disabled: Bool?
+    var lineClamp: Int?
+    var strikethrough: Bool?
+    var value: String?
+    var placeholder: String?
+    var changeAction: String?
+    var submitAction: String?
+    var leadingAccessory: RuntimeNodeBox?
+    var trailingAccessory: RuntimeNodeBox?
     var children: [RuntimeRenderNode]
 
     init(
-        id: String = UUID().uuidString,
+        id: String = "",
         type: String,
         direction: String? = nil,
         spacing: Double? = nil,
+        role: String? = nil,
+        tone: String? = nil,
         text: String? = nil,
         title: String? = nil,
         action: String? = nil,
+        symbol: String? = nil,
+        payload: RuntimeActionPayload? = nil,
+        checked: Bool? = nil,
+        disabled: Bool? = nil,
+        lineClamp: Int? = nil,
+        strikethrough: Bool? = nil,
+        value: String? = nil,
+        placeholder: String? = nil,
+        changeAction: String? = nil,
+        submitAction: String? = nil,
+        leadingAccessory: RuntimeNodeBox? = nil,
+        trailingAccessory: RuntimeNodeBox? = nil,
         children: [RuntimeRenderNode] = []
     ) {
         self.id = id
         self.type = type
         self.direction = direction
         self.spacing = spacing
+        self.role = role
+        self.tone = tone
         self.text = text
         self.title = title
         self.action = action
+        self.symbol = symbol
+        self.payload = payload
+        self.checked = checked
+        self.disabled = disabled
+        self.lineClamp = lineClamp
+        self.strikethrough = strikethrough
+        self.value = value
+        self.placeholder = placeholder
+        self.changeAction = changeAction
+        self.submitAction = submitAction
+        self.leadingAccessory = leadingAccessory
+        self.trailingAccessory = trailingAccessory
         self.children = children
     }
 
@@ -46,22 +88,105 @@ struct RuntimeRenderNode: Codable, Equatable, Identifiable {
         case type
         case direction
         case spacing
+        case role
+        case tone
         case text
         case title
         case action
+        case symbol
+        case payload
+        case checked
+        case disabled
+        case lineClamp
+        case strikethrough
+        case value
+        case placeholder
+        case changeAction
+        case submitAction
+        case leadingAccessory
+        case trailingAccessory
         case children
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? ""
         type = try container.decode(String.self, forKey: .type)
         direction = try container.decodeIfPresent(String.self, forKey: .direction)
         spacing = try container.decodeIfPresent(Double.self, forKey: .spacing)
+        role = try container.decodeIfPresent(String.self, forKey: .role)
+        tone = try container.decodeIfPresent(String.self, forKey: .tone)
         text = try container.decodeIfPresent(String.self, forKey: .text)
         title = try container.decodeIfPresent(String.self, forKey: .title)
         action = try container.decodeIfPresent(String.self, forKey: .action)
+        symbol = try container.decodeIfPresent(String.self, forKey: .symbol)
+        payload = try container.decodeIfPresent(RuntimeActionPayload.self, forKey: .payload)
+        checked = try container.decodeIfPresent(Bool.self, forKey: .checked)
+        disabled = try container.decodeIfPresent(Bool.self, forKey: .disabled)
+        lineClamp = try container.decodeIfPresent(Int.self, forKey: .lineClamp)
+        strikethrough = try container.decodeIfPresent(Bool.self, forKey: .strikethrough)
+        value = try container.decodeIfPresent(String.self, forKey: .value)
+        placeholder = try container.decodeIfPresent(String.self, forKey: .placeholder)
+        changeAction = try container.decodeIfPresent(String.self, forKey: .changeAction)
+        submitAction = try container.decodeIfPresent(String.self, forKey: .submitAction)
+        leadingAccessory = try container.decodeIfPresent(RuntimeNodeBox.self, forKey: .leadingAccessory)
+        trailingAccessory = try container.decodeIfPresent(RuntimeNodeBox.self, forKey: .trailingAccessory)
         children = try container.decodeIfPresent([RuntimeRenderNode].self, forKey: .children) ?? []
+    }
+
+    func normalizedForRuntime(path: String = "root") -> RuntimeRenderNode {
+        let resolvedID = id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? path : id
+        let normalizedLeadingAccessory = leadingAccessory.map {
+            RuntimeNodeBox(node: $0.node.normalizedForRuntime(path: "\(resolvedID).leadingAccessory"))
+        }
+        let normalizedTrailingAccessory = trailingAccessory.map {
+            RuntimeNodeBox(node: $0.node.normalizedForRuntime(path: "\(resolvedID).trailingAccessory"))
+        }
+        let normalizedChildren = children.enumerated().map { index, child in
+            child.normalizedForRuntime(path: "\(resolvedID).children.\(index)")
+        }
+
+        return RuntimeRenderNode(
+            id: resolvedID,
+            type: type,
+            direction: direction,
+            spacing: spacing,
+            role: role,
+            tone: tone,
+            text: text,
+            title: title,
+            action: action,
+            symbol: symbol,
+            payload: payload,
+            checked: checked,
+            disabled: disabled,
+            lineClamp: lineClamp,
+            strikethrough: strikethrough,
+            value: value,
+            placeholder: placeholder,
+            changeAction: changeAction,
+            submitAction: submitAction,
+            leadingAccessory: normalizedLeadingAccessory,
+            trailingAccessory: normalizedTrailingAccessory,
+            children: normalizedChildren
+        )
+    }
+}
+
+struct RuntimeActionPayload: Codable, Equatable {
+    var value: String?
+    var id: String?
+}
+
+final class RuntimeNodeBox: Codable, Equatable {
+    var node: RuntimeRenderNode
+
+    init(node: RuntimeRenderNode) {
+        self.node = node
+    }
+
+    static func == (lhs: RuntimeNodeBox, rhs: RuntimeNodeBox) -> Bool {
+        lhs.node == rhs.node
     }
 }
 
@@ -93,6 +218,7 @@ private struct RuntimeRequestEnvelope: Codable {
     var instanceID: String?
     var bundlePath: String?
     var actionID: String?
+    var payload: RuntimeActionPayload?
     var environment: RuntimeEnvironmentPayload?
 }
 
@@ -163,7 +289,7 @@ final class WidgetRuntimeController {
         }
     }
 
-    func triggerAction(_ actionID: String, for instanceID: UUID) {
+    func triggerAction(_ actionID: String, payload: RuntimeActionPayload? = nil, for instanceID: UUID) {
         guard let mounted = mountedWidgets[instanceID] else { return }
         Task {
             await ensureLoaded(mounted.definition)
@@ -176,6 +302,7 @@ final class WidgetRuntimeController {
                         instanceID: instanceID.uuidString,
                         bundlePath: nil,
                         actionID: actionID,
+                        payload: payload,
                         environment: mounted.environment
                     )
                 )
@@ -253,12 +380,13 @@ final class WidgetRuntimeController {
                     instanceID: instanceID.uuidString,
                     bundlePath: nil,
                     actionID: nil,
+                    payload: nil,
                     environment: mounted.environment
                 )
             )
 
             if let tree = response.tree {
-                renderTreeByInstance[instanceID] = tree
+                renderTreeByInstance[instanceID] = tree.normalizedForRuntime()
                 errorByInstance.removeValue(forKey: instanceID)
             } else if let message = response.message {
                 errorByInstance[instanceID] = message
@@ -289,6 +417,7 @@ final class WidgetRuntimeController {
                     instanceID: nil,
                     bundlePath: definition.bundleFileURL.path,
                     actionID: nil,
+                    payload: nil,
                     environment: nil
                 )
             )

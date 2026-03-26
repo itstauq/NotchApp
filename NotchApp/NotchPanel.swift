@@ -34,6 +34,14 @@ class NotchPanel: NSPanel {
     override var canBecomeKey: Bool { needsKeyInput }
     override var canBecomeMain: Bool { false }
 
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown {
+            handleRuntimeInputBlur(for: event)
+        }
+
+        super.sendEvent(event)
+    }
+
     static var contentPanel: NotchPanel? {
         NSApp.windows
             .compactMap { $0 as? NotchPanel }
@@ -45,6 +53,31 @@ class NotchPanel: NSPanel {
         hosting.frame = NSRect(origin: .zero, size: frame.size)
         hosting.autoresizingMask = [.width, .height]
         contentView = hosting
+    }
+
+    func activateForKeyInput() {
+        needsKeyInput = true
+        NSApp.activate(ignoringOtherApps: true)
+        makeKeyAndOrderFront(nil)
+    }
+
+    func releaseKeyInput() {
+        needsKeyInput = false
+    }
+
+    private func handleRuntimeInputBlur(for event: NSEvent) {
+        guard needsKeyInput,
+              let contentView,
+              let editor = firstResponder as? NSTextView,
+              let textField = editor.delegate as? NSTextField else { return }
+
+        let locationInContent = contentView.convert(event.locationInWindow, from: nil)
+        let hitView = contentView.hitTest(locationInContent)
+
+        guard hitView?.isDescendant(of: textField) != true else { return }
+
+        _ = makeFirstResponder(nil)
+        releaseKeyInput()
     }
 }
 

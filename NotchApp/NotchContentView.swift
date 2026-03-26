@@ -17,7 +17,6 @@ struct NotchContentView: View {
     }
 
     private let headerRowHeight: CGFloat = 44
-    private let showsHeaderLaneDebug = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,8 +51,7 @@ struct NotchContentView: View {
         ZStack(alignment: .topLeading) {
             HStack(spacing: 0) {
                 ZStack(alignment: .leading) {
-                    Rectangle()
-                        .fill(showsHeaderLaneDebug ? Color.red.opacity(0.18) : .clear)
+                    Color.clear
 
                     ZStack(alignment: .leading) {
                         ViewSwitcher(viewManager: vm.viewManager, vm: vm)
@@ -68,12 +66,11 @@ struct NotchContentView: View {
                 .clipped()
 
                 Rectangle()
-                    .fill(showsHeaderLaneDebug ? Color.green.opacity(0.2) : .clear)
+                    .fill(.clear)
                     .frame(width: vm.notchWidth, height: headerRowHeight)
 
                 ZStack(alignment: .trailing) {
-                    Rectangle()
-                        .fill(showsHeaderLaneDebug ? Color.blue.opacity(0.18) : .clear)
+                    Color.clear
 
                     HStack(spacing: 6) {
                         if vm.isEditingLayout {
@@ -583,6 +580,7 @@ private struct RuntimeWidgetSurface: View {
                 runtimeLoadingSurface
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task(id: "\(widget.id.uuidString)-\(widget.span)-\(vm.isEditingLayout)-\(vm.viewManager.selectedViewID.uuidString)") {
             if vm.widgetRuntime.isMounted(instanceID: widget.id) {
                 vm.widgetRuntime.update(
@@ -669,55 +667,348 @@ private struct RuntimeNodeView: View {
         switch node.type {
         case "Stack":
             stackView
+        case "Inline":
+            inlineView
+        case "Row":
+            rowView
         case "Text":
-            Text(node.text ?? "")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.88))
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            textView
         case "Button":
-            Button {
-                if let action = node.action {
-                    vm.widgetRuntime.triggerAction(action, for: instanceID)
-                }
-            } label: {
-                Text(node.title ?? "Action")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.95))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 28)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(tint.opacity(0.24))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(tint.opacity(0.32), lineWidth: 1)
-                    )
-            }
-            .buttonStyle(.plain)
+            buttonView
+        case "Icon":
+            iconView
+        case "IconButton":
+            iconButtonView
+        case "Checkbox":
+            checkboxView
+        case "Input":
+            RuntimeInputNodeView(node: node, vm: vm, instanceID: instanceID, tint: tint)
+        case "Spacer":
+            Spacer(minLength: 0)
         default:
             EmptyView()
         }
     }
 
+    private var textView: some View {
+        Text(node.text ?? "")
+            .font(textFont(role: node.role))
+            .foregroundStyle(textColor(tone: node.tone, role: node.role))
+            .multilineTextAlignment(.leading)
+            .lineLimit(node.lineClamp)
+            .strikethrough(node.strikethrough ?? false, color: .white.opacity(0.28))
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var buttonView: some View {
+        Button {
+            if let action = node.action {
+                vm.widgetRuntime.triggerAction(action, payload: node.payload, for: instanceID)
+            }
+        } label: {
+            Text(node.title ?? "Action")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.95))
+                .frame(maxWidth: .infinity)
+                .frame(height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(tint.opacity(0.24))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(tint.opacity(0.32), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var iconView: some View {
+        Image(systemName: node.symbol ?? "questionmark")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(iconColor(tone: node.tone))
+    }
+
+    private var iconButtonView: some View {
+        Button {
+            guard let action = node.action, !(node.disabled ?? false) else { return }
+            vm.widgetRuntime.triggerAction(action, payload: node.payload, for: instanceID)
+        } label: {
+            Image(systemName: node.symbol ?? "questionmark")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(iconColor(tone: node.tone))
+                .frame(width: 16, height: 16)
+        }
+        .buttonStyle(.plain)
+        .disabled(node.disabled ?? false)
+    }
+
+    private var checkboxView: some View {
+        Button {
+            guard let action = node.action else { return }
+            vm.widgetRuntime.triggerAction(action, payload: node.payload, for: instanceID)
+        } label: {
+            Circle()
+                .strokeBorder(.white.opacity((node.checked ?? false) ? 0.12 : 0.28), lineWidth: 1.2)
+                .frame(width: 14, height: 14)
+                .overlay {
+                    if node.checked ?? false {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.72))
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+    }
+
     @ViewBuilder
     private var stackView: some View {
-        let isHorizontal = node.direction == "horizontal"
         let spacing = node.spacing.map { CGFloat($0) } ?? 8
-        if isHorizontal {
-            HStack(spacing: spacing) {
-                ForEach(node.children) { child in
-                    RuntimeNodeView(node: child, vm: vm, instanceID: instanceID, tint: tint)
-                }
+        VStack(alignment: .leading, spacing: spacing) {
+            ForEach(node.children) { child in
+                RuntimeNodeView(node: child, vm: vm, instanceID: instanceID, tint: tint)
             }
-        } else {
-            VStack(alignment: .leading, spacing: spacing) {
-                ForEach(node.children) { child in
+        }
+    }
+
+    @ViewBuilder
+    private var inlineView: some View {
+        let spacing = node.spacing.map { CGFloat($0) } ?? 8
+        HStack(spacing: spacing) {
+            ForEach(node.children) { child in
+                if child.type == "Spacer" {
+                    Spacer(minLength: 0)
+                } else {
                     RuntimeNodeView(node: child, vm: vm, instanceID: instanceID, tint: tint)
                 }
             }
         }
+    }
+
+    private var rowView: some View {
+        Button {
+            guard let action = node.action else { return }
+            vm.widgetRuntime.triggerAction(action, payload: node.payload, for: instanceID)
+        } label: {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.white.opacity(0.05))
+                .frame(maxWidth: .infinity)
+                .frame(height: 34)
+                .overlay {
+                    if node.children.count == 1 {
+                        RuntimeNodeView(node: node.children[0], vm: vm, instanceID: instanceID, tint: tint)
+                            .padding(.horizontal, 10)
+                    } else {
+                        HStack(spacing: 8) {
+                            ForEach(node.children) { child in
+                                RuntimeNodeView(node: child, vm: vm, instanceID: instanceID, tint: tint)
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .disabled(node.action == nil)
+    }
+
+    private func textFont(role: String?) -> Font {
+        switch role {
+        case "caption":
+            .system(size: 11, weight: .semibold)
+        case "placeholder":
+            .system(size: 11, weight: .medium)
+        default:
+            .system(size: 11, weight: .medium)
+        }
+    }
+
+    private func textColor(tone: String?, role: String?) -> Color {
+        if role == "placeholder" {
+            return .white.opacity(0.48)
+        }
+
+        switch tone {
+        case "primary":
+            return Color.white.opacity(0.84)
+        case "secondary":
+            return Color.white.opacity(0.72)
+        case "tertiary":
+            return Color.white.opacity(0.42)
+        default:
+            return Color.white.opacity(0.72)
+        }
+    }
+
+    private func iconColor(tone: String?) -> Color {
+        switch tone {
+        case "primary":
+            return .white.opacity(0.84)
+        case "tertiary":
+            return .white.opacity(0.26)
+        default:
+            return .white.opacity(0.42)
+        }
+    }
+}
+
+private struct RuntimeInputNodeView: View {
+    var node: RuntimeRenderNode
+    var vm: NotchViewModel
+    var instanceID: UUID
+    var tint: Color
+
+    @State private var text = ""
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let leadingAccessory = node.leadingAccessory {
+                RuntimeNodeView(node: leadingAccessory.node, vm: vm, instanceID: instanceID, tint: tint)
+            }
+
+            RuntimeInputTextField(
+                text: $text,
+                placeholder: node.placeholder ?? "",
+                onCommit: {
+                    guard let action = node.submitAction else { return }
+                    vm.widgetRuntime.triggerAction(
+                        action,
+                        payload: RuntimeActionPayload(value: text, id: nil),
+                        for: instanceID
+                    )
+                }
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Spacer(minLength: 0)
+
+            if let trailingAccessory = node.trailingAccessory {
+                Circle()
+                    .fill(.white.opacity(0.08))
+                    .frame(width: 24, height: 24)
+                    .overlay {
+                        RuntimeNodeView(node: trailingAccessory.node, vm: vm, instanceID: instanceID, tint: tint)
+                    }
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity)
+        .frame(height: 40)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.white.opacity(0.07))
+        )
+        .onAppear {
+            text = node.value ?? ""
+        }
+        .onChange(of: node.value ?? "") { _, newValue in
+            if newValue != text {
+                text = newValue
+            }
+        }
+        .onChange(of: text) { oldValue, newValue in
+            guard oldValue != newValue,
+                  newValue != (node.value ?? ""),
+                  let action = node.changeAction else { return }
+
+            vm.widgetRuntime.triggerAction(
+                action,
+                payload: RuntimeActionPayload(value: newValue, id: nil),
+                for: instanceID
+            )
+        }
+    }
+}
+
+private struct RuntimeInputTextField: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var onCommit: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, onCommit: onCommit)
+    }
+
+    func makeNSView(context: Context) -> NSTextField {
+        let textField = RuntimeFocusableTextField(frame: .zero)
+        textField.delegate = context.coordinator
+        textField.stringValue = text
+        configureNotchTextField(
+            textField,
+            placeholder: placeholder,
+            font: .systemFont(ofSize: 11, weight: .medium),
+            textColor: .white.withAlphaComponent(0.72)
+        )
+        return textField
+    }
+
+    func updateNSView(_ textField: NSTextField, context: Context) {
+        context.coordinator.onCommit = onCommit
+
+        if textField.stringValue != text {
+            textField.stringValue = text
+        }
+    }
+
+    static func dismantleNSView(_ textField: NSTextField, coordinator: Coordinator) {
+        if let panel = textField.window as? NotchPanel {
+            panel.releaseKeyInput()
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        @Binding var text: String
+        var onCommit: () -> Void
+
+        init(text: Binding<String>, onCommit: @escaping () -> Void) {
+            _text = text
+            self.onCommit = onCommit
+        }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard let textField = obj.object as? NSTextField else { return }
+            text = textField.stringValue
+        }
+
+        func controlTextDidBeginEditing(_ obj: Notification) {
+            guard let textField = obj.object as? NSTextField,
+                  let window = textField.window else { return }
+
+            if let panel = window as? NotchPanel {
+                panel.activateForKeyInput()
+            }
+
+            if let editor = window.fieldEditor(true, for: textField) as? NSTextView {
+                editor.insertionPointColor = .white
+            }
+        }
+
+        func controlTextDidEndEditing(_ obj: Notification) {
+            guard let textField = obj.object as? NSTextField,
+                  let panel = textField.window as? NotchPanel else { return }
+
+            panel.releaseKeyInput()
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                onCommit()
+                return true
+            }
+
+            return false
+        }
+    }
+}
+
+private final class RuntimeFocusableTextField: NSTextField {
+    override func mouseDown(with event: NSEvent) {
+        if let panel = window as? NotchPanel {
+            panel.activateForKeyInput()
+        }
+
+        super.mouseDown(with: event)
     }
 }
 
@@ -849,10 +1140,9 @@ struct RenameViewDialog: View {
         .onAppear {
             // Enable keyboard on the panel
             if let panel = NotchPanel.contentPanel {
-                panel.needsKeyInput = true
-                NSApp.activate(ignoringOtherApps: true)
+                panel.activateForKeyInput()
                 DispatchQueue.main.async {
-                    panel.makeKeyAndOrderFront(nil)
+                    panel.activateForKeyInput()
                 }
             }
             escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -870,7 +1160,7 @@ struct RenameViewDialog: View {
             }
             vm.renameViewFieldScreenRect = .zero
             if let panel = NotchPanel.contentPanel {
-                panel.needsKeyInput = false
+                panel.releaseKeyInput()
             }
         }
     }
@@ -981,10 +1271,9 @@ struct EditModeConfirmationDialog: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             if let panel = NotchPanel.contentPanel {
-                panel.needsKeyInput = true
-                NSApp.activate(ignoringOtherApps: true)
+                panel.activateForKeyInput()
                 DispatchQueue.main.async {
-                    panel.makeKeyAndOrderFront(nil)
+                    panel.activateForKeyInput()
                 }
             }
             escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -1005,17 +1294,13 @@ struct EditModeConfirmationDialog: View {
                 escMonitor = nil
             }
             if let panel = NotchPanel.contentPanel {
-                panel.needsKeyInput = false
+                panel.releaseKeyInput()
             }
         }
     }
 
     private func save() {
         vm.saveEditMode()
-    }
-
-    private func revert() {
-        vm.revertEditMode()
     }
 
     private func discard() {
@@ -1066,18 +1351,12 @@ private struct RenameTextField: NSViewRepresentable {
         let textField = NSTextField(frame: .zero)
         textField.delegate = context.coordinator
         textField.stringValue = text
-        textField.placeholderString = placeholder
-        textField.isBordered = false
-        textField.isBezeled = false
-        textField.drawsBackground = false
-        textField.focusRingType = .none
-        textField.isEditable = true
-        textField.isSelectable = true
-        textField.isEnabled = true
-        textField.font = .systemFont(ofSize: 12, weight: .medium)
-        textField.textColor = .white
-        textField.cell?.usesSingleLineMode = true
-        textField.cell?.lineBreakMode = .byTruncatingTail
+        configureNotchTextField(
+            textField,
+            placeholder: placeholder,
+            font: .systemFont(ofSize: 12, weight: .medium),
+            textColor: .white
+        )
         return textField
     }
 
@@ -1164,6 +1443,26 @@ private struct RenameTextField: NSViewRepresentable {
             return false
         }
     }
+}
+
+private func configureNotchTextField(
+    _ textField: NSTextField,
+    placeholder: String,
+    font: NSFont,
+    textColor: NSColor
+) {
+    textField.placeholderString = placeholder
+    textField.isBordered = false
+    textField.isBezeled = false
+    textField.drawsBackground = false
+    textField.focusRingType = .none
+    textField.isEditable = true
+    textField.isSelectable = true
+    textField.isEnabled = true
+    textField.font = font
+    textField.textColor = textColor
+    textField.cell?.usesSingleLineMode = true
+    textField.cell?.lineBreakMode = .byTruncatingTail
 }
 
 struct NotchBlurView: View {

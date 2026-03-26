@@ -80,7 +80,7 @@ function render(widgetID, instanceID, environment) {
   return tree;
 }
 
-function invokeAction(widgetID, instanceID, actionID, environment) {
+function invokeAction(widgetID, instanceID, actionID, environment, payload) {
   const { mod } = ensureWidget(widgetID);
   const logger = widgetLogger(widgetID);
   const state = stateFor(widgetID, instanceID, mod);
@@ -90,7 +90,7 @@ function invokeAction(widgetID, instanceID, actionID, environment) {
     throw new Error(`Unknown action '${actionID}' for widget ${widgetID}.`);
   }
 
-  const nextState = action(state, { environment, logger });
+  const nextState = action(state, { environment, logger, payload });
   if (nextState !== undefined) {
     widgetStates.get(widgetID).set(instanceID, nextState);
   }
@@ -128,7 +128,7 @@ for await (const line of rl) {
         break;
       }
       case "action":
-        invokeAction(message.widgetID, message.instanceID, message.actionID, message.environment);
+        invokeAction(message.widgetID, message.instanceID, message.actionID, message.environment, message.payload);
         send({ requestID: message.requestID, type: "ack", widgetID: message.widgetID });
         break;
       default:
