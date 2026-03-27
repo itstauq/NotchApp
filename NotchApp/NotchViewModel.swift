@@ -22,6 +22,7 @@ struct RuntimeRenderNode: Codable, Equatable, Identifiable {
     var title: String?
     var action: String?
     var symbol: String?
+    var size: String?
     var payload: RuntimeActionPayload?
     var checked: Bool?
     var disabled: Bool?
@@ -46,6 +47,7 @@ struct RuntimeRenderNode: Codable, Equatable, Identifiable {
         title: String? = nil,
         action: String? = nil,
         symbol: String? = nil,
+        size: String? = nil,
         payload: RuntimeActionPayload? = nil,
         checked: Bool? = nil,
         disabled: Bool? = nil,
@@ -69,6 +71,7 @@ struct RuntimeRenderNode: Codable, Equatable, Identifiable {
         self.title = title
         self.action = action
         self.symbol = symbol
+        self.size = size
         self.payload = payload
         self.checked = checked
         self.disabled = disabled
@@ -94,6 +97,7 @@ struct RuntimeRenderNode: Codable, Equatable, Identifiable {
         case title
         case action
         case symbol
+        case size
         case payload
         case checked
         case disabled
@@ -120,6 +124,7 @@ struct RuntimeRenderNode: Codable, Equatable, Identifiable {
         title = try container.decodeIfPresent(String.self, forKey: .title)
         action = try container.decodeIfPresent(String.self, forKey: .action)
         symbol = try container.decodeIfPresent(String.self, forKey: .symbol)
+        size = try container.decodeIfPresent(String.self, forKey: .size)
         payload = try container.decodeIfPresent(RuntimeActionPayload.self, forKey: .payload)
         checked = try container.decodeIfPresent(Bool.self, forKey: .checked)
         disabled = try container.decodeIfPresent(Bool.self, forKey: .disabled)
@@ -157,6 +162,7 @@ struct RuntimeRenderNode: Codable, Equatable, Identifiable {
             title: title,
             action: action,
             symbol: symbol,
+            size: size,
             payload: payload,
             checked: checked,
             disabled: disabled,
@@ -176,6 +182,17 @@ struct RuntimeRenderNode: Codable, Equatable, Identifiable {
 struct RuntimeActionPayload: Codable, Equatable {
     var value: String?
     var id: String?
+    var status: String?
+    var message: String?
+    var count: Int?
+}
+
+private struct RuntimeHostCapabilityRequest: Codable {
+    var type: String
+    var progressAction: String?
+    var successAction: String?
+    var cancelAction: String?
+    var errorAction: String?
 }
 
 final class RuntimeNodeBox: Codable, Equatable {
@@ -229,8 +246,11 @@ private struct RuntimeResponseEnvelope: Codable {
     var level: String?
     var message: String?
     var tree: RuntimeRenderNode?
+    var hostCapability: RuntimeHostCapabilityRequest?
 }
 
+// Host capabilities are generic runtime services that widgets can request
+// through the message boundary without reaching into app-specific APIs.
 @MainActor
 @Observable
 final class WidgetRuntimeController {
@@ -249,7 +269,6 @@ final class WidgetRuntimeController {
     private var developmentWidgetIDs: Set<String> = []
     private let jsonEncoder = JSONEncoder()
     private let jsonDecoder = JSONDecoder()
-
     func isMounted(instanceID: UUID) -> Bool {
         mountedWidgets[instanceID] != nil
     }
@@ -294,7 +313,7 @@ final class WidgetRuntimeController {
         Task {
             await ensureLoaded(mounted.definition)
             do {
-                _ = try await sendRequest(
+                let response = try await sendRequest(
                     RuntimeRequestEnvelope(
                         requestID: UUID().uuidString,
                         type: "action",
@@ -306,7 +325,11 @@ final class WidgetRuntimeController {
                         environment: mounted.environment
                     )
                 )
-                await renderInstance(instanceID)
+                if let hostCapability = response.hostCapability {
+                    await handleHostCapability(hostCapability, for: instanceID)
+                } else {
+                    await renderInstance(instanceID)
+                }
             } catch {
                 errorByInstance[instanceID] = error.localizedDescription
             }
@@ -683,6 +706,37 @@ final class WidgetRuntimeController {
 
         for instanceID in affectedInstances {
             await renderInstance(instanceID)
+        }
+    }
+
+    private func handleHostCapability(_ hostCapability: RuntimeHostCapabilityRequest, for instanceID: UUID) async {
+        guard let mounted = mountedWidgets[instanceID] else { return }
+
+        log.write("Widget \(mounted.definition.id) [warn]: Unsupported host capability \(hostCapability.type)")
+        await renderInstance(instanceID)
+    }
+
+    private func dispatchFollowUpAction(
+        _ actionID: String,
+        payload: RuntimeActionPayload,
+        mounted: RuntimeMountedWidget
+    ) async {
+        do {
+            _ = try await sendRequest(
+                RuntimeRequestEnvelope(
+                    requestID: UUID().uuidString,
+                    type: "action",
+                    widgetID: mounted.definition.id,
+                    instanceID: mounted.instanceID.uuidString,
+                    bundlePath: nil,
+                    actionID: actionID,
+                    payload: payload,
+                    environment: mounted.environment
+                )
+            )
+            await renderInstance(mounted.instanceID)
+        } catch {
+            errorByInstance[mounted.instanceID] = error.localizedDescription
         }
     }
 }

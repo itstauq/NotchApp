@@ -5,6 +5,31 @@ const require = createRequire(import.meta.url);
 const widgets = new Map();
 const widgetStates = new Map();
 
+// Actions can either return next state directly or ask the host runtime to
+// perform a generic platform capability and then dispatch follow-up actions.
+function hostCapabilityFor(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const capability = value.__notchHostCapability;
+  if (!capability || typeof capability !== "object") {
+    return null;
+  }
+
+  if (typeof capability.type !== "string" || capability.type.trim() === "") {
+    throw new Error("Invalid host capability request: missing type.");
+  }
+
+  return {
+    type: capability.type,
+    progressAction: typeof capability.progressAction === "string" ? capability.progressAction : null,
+    successAction: typeof capability.successAction === "string" ? capability.successAction : null,
+    cancelAction: typeof capability.cancelAction === "string" ? capability.cancelAction : null,
+    errorAction: typeof capability.errorAction === "string" ? capability.errorAction : null,
+  };
+}
+
 function send(payload) {
   process.stdout.write(`${JSON.stringify(payload)}\n`);
 }
@@ -91,9 +116,16 @@ function invokeAction(widgetID, instanceID, actionID, environment, payload) {
   }
 
   const nextState = action(state, { environment, logger, payload });
+  const hostCapability = hostCapabilityFor(nextState);
+  if (hostCapability) {
+    return { hostCapability };
+  }
+
   if (nextState !== undefined) {
     widgetStates.get(widgetID).set(instanceID, nextState);
   }
+
+  return {};
 }
 
 const rl = readline.createInterface({
@@ -128,8 +160,12 @@ for await (const line of rl) {
         break;
       }
       case "action":
-        invokeAction(message.widgetID, message.instanceID, message.actionID, message.environment, message.payload);
-        send({ requestID: message.requestID, type: "ack", widgetID: message.widgetID });
+        send({
+          requestID: message.requestID,
+          type: "ack",
+          widgetID: message.widgetID,
+          ...invokeAction(message.widgetID, message.instanceID, message.actionID, message.environment, message.payload),
+        });
         break;
       default:
         throw new Error(`Unsupported message type '${message.type}'.`);

@@ -7,6 +7,7 @@ import esbuild from "esbuild";
 
 const command = process.argv[2];
 const packageDir = process.cwd();
+const sdkRoot = packageRootFromMeta(import.meta.url);
 const canonicalWidgetsRoot = path.join(
   os.homedir(),
   "Library",
@@ -20,8 +21,7 @@ function packageRootFromMeta(metaURL) {
 }
 
 function developmentWidgetsRoot() {
-  const workspaceRoot = packageRootFromMeta(import.meta.url);
-  return path.join(workspaceRoot, "widgets");
+  return path.resolve(sdkRoot, "..", "widgets");
 }
 
 function readManifest(targetPackageDir) {
@@ -210,6 +210,10 @@ async function buildWidget(targetPackageDir, options = {}) {
     target: "node22",
     jsx: "automatic",
     jsxImportSource: "@notchapp/api",
+    alias: {
+      "@notchapp/api": path.join(sdkRoot, "packages", "api"),
+      "@notchapp/api/jsx-runtime": path.join(sdkRoot, "packages", "api", "jsx-runtime.js"),
+    },
     sourcemap: "inline",
     logLevel: "silent",
   });

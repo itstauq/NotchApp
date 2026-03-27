@@ -40,6 +40,23 @@ function Inline(props = {}) {
   };
 }
 
+function Spacer(props = {}) {
+  return {
+    id: props.id ?? undefined,
+    type: "Spacer",
+    children: [],
+  };
+}
+
+function ScrollView(props = {}) {
+  return {
+    id: props.id ?? undefined,
+    type: "ScrollView",
+    spacing: props.spacing ?? 8,
+    children: flattenChildren(props.children),
+  };
+}
+
 function Row(props = {}) {
   return {
     id: props.id ?? undefined,
@@ -81,6 +98,7 @@ function IconButton(props = {}) {
     action: props.action ?? null,
     payload: props.payload ?? null,
     tone: props.tone ?? undefined,
+    size: props.size ?? undefined,
     disabled: props.disabled ?? false,
     children: [],
   };
@@ -122,9 +140,23 @@ function Button(props = {}) {
   };
 }
 
+function requestHostCapability(type, props = {}) {
+  return {
+    __notchHostCapability: {
+      type,
+      progressAction: props.progressAction ?? null,
+      successAction: props.successAction ?? null,
+      cancelAction: props.cancelAction ?? null,
+      errorAction: props.errorAction ?? null,
+    },
+  };
+}
+
 module.exports = {
   Stack,
   Inline,
+  Spacer,
+  ScrollView,
   Row,
   Text,
   Icon,
@@ -135,5 +167,6 @@ module.exports = {
   __internal: {
     flattenChildren,
     extractText,
+    requestHostCapability,
   },
 };

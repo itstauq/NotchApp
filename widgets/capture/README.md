@@ -15,6 +15,7 @@ Capture is the clearest expression of NotchApp's original product motivation. It
 - Checklist rows with complete and delete actions
 - Strikethrough styling for completed items
 - Fast add, review, complete, and remove flows
+- Keep the mic affordance visually present, but defer active voice input until the platform direction is clearer
 
 ## Likely UI Shape
 
@@ -48,5 +49,5 @@ This widget can be self-contained if it owns local state and persists items thro
 
 Open questions:
 
-- Whether the mic affordance is purely decorative in the first parity pass or requires a generic input/audio capability
+- Whether the mic affordance stays decorative in v1 or later graduates into a generic input capability
 - Whether capture items remain widget-local in v1 or later sync into a broader app model

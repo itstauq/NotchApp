@@ -669,6 +669,8 @@ private struct RuntimeNodeView: View {
             stackView
         case "Inline":
             inlineView
+        case "ScrollView":
+            scrollView
         case "Row":
             rowView
         case "Text":
@@ -730,14 +732,15 @@ private struct RuntimeNodeView: View {
     }
 
     private var iconButtonView: some View {
-        Button {
+        let metrics = iconButtonMetrics(size: node.size)
+        return Button {
             guard let action = node.action, !(node.disabled ?? false) else { return }
             vm.widgetRuntime.triggerAction(action, payload: node.payload, for: instanceID)
         } label: {
             Image(systemName: node.symbol ?? "questionmark")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: metrics.symbolSize, weight: .semibold))
                 .foregroundStyle(iconColor(tone: node.tone))
-                .frame(width: 16, height: 16)
+                .frame(width: metrics.frameSize, height: metrics.frameSize)
         }
         .buttonStyle(.plain)
         .disabled(node.disabled ?? false)
@@ -786,31 +789,65 @@ private struct RuntimeNodeView: View {
         }
     }
 
-    private var rowView: some View {
-        Button {
-            guard let action = node.action else { return }
-            vm.widgetRuntime.triggerAction(action, payload: node.payload, for: instanceID)
-        } label: {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.white.opacity(0.05))
-                .frame(maxWidth: .infinity)
-                .frame(height: 34)
-                .overlay {
-                    if node.children.count == 1 {
-                        RuntimeNodeView(node: node.children[0], vm: vm, instanceID: instanceID, tint: tint)
-                            .padding(.horizontal, 10)
-                    } else {
-                        HStack(spacing: 8) {
-                            ForEach(node.children) { child in
-                                RuntimeNodeView(node: child, vm: vm, instanceID: instanceID, tint: tint)
-                            }
-                        }
-                        .padding(.horizontal, 10)
-                    }
+    @ViewBuilder
+    private var scrollView: some View {
+        let spacing = node.spacing.map { CGFloat($0) } ?? 8
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: spacing) {
+                ForEach(node.children) { child in
+                    RuntimeNodeView(node: child, vm: vm, instanceID: instanceID, tint: tint)
                 }
+            }
+            .padding(.bottom, 18)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(.plain)
-        .disabled(node.action == nil)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
+        .mask(alignment: .bottom) {
+            LinearGradient(
+                stops: [
+                    .init(color: .black, location: 0),
+                    .init(color: .black, location: 0.82),
+                    .init(color: .clear, location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+    }
+
+    private var rowView: some View {
+        Group {
+            if let action = node.action {
+                rowContainer
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                    vm.widgetRuntime.triggerAction(action, payload: node.payload, for: instanceID)
+                    }
+            } else {
+                rowContainer
+            }
+        }
+    }
+
+    private var rowContainer: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(.white.opacity(0.05))
+            .frame(maxWidth: .infinity)
+            .frame(height: 34)
+            .overlay {
+                if node.children.count == 1 {
+                    RuntimeNodeView(node: node.children[0], vm: vm, instanceID: instanceID, tint: tint)
+                        .padding(.horizontal, 10)
+                } else {
+                    HStack(spacing: 8) {
+                        ForEach(node.children) { child in
+                            RuntimeNodeView(node: child, vm: vm, instanceID: instanceID, tint: tint)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                }
+            }
     }
 
     private func textFont(role: String?) -> Font {
@@ -851,6 +888,15 @@ private struct RuntimeNodeView: View {
             return .white.opacity(0.42)
         }
     }
+
+    private func iconButtonMetrics(size: String?) -> (symbolSize: CGFloat, frameSize: CGFloat) {
+        switch size {
+        case "large":
+            return (12, 20)
+        default:
+            return (10, 16)
+        }
+    }
 }
 
 private struct RuntimeInputNodeView: View {
@@ -874,7 +920,7 @@ private struct RuntimeInputNodeView: View {
                     guard let action = node.submitAction else { return }
                     vm.widgetRuntime.triggerAction(
                         action,
-                        payload: RuntimeActionPayload(value: text, id: nil),
+                        payload: RuntimeActionPayload(value: text, id: nil, status: nil, message: nil, count: nil),
                         for: instanceID
                     )
                 }
@@ -914,7 +960,7 @@ private struct RuntimeInputNodeView: View {
 
             vm.widgetRuntime.triggerAction(
                 action,
-                payload: RuntimeActionPayload(value: newValue, id: nil),
+                payload: RuntimeActionPayload(value: newValue, id: nil, status: nil, message: nil, count: nil),
                 for: instanceID
             )
         }
