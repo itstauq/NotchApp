@@ -144,12 +144,34 @@ function requestHostCapability(type, props = {}) {
   return {
     __notchHostCapability: {
       type,
+      data: props.data ?? null,
       progressAction: props.progressAction ?? null,
       successAction: props.successAction ?? null,
       cancelAction: props.cancelAction ?? null,
       errorAction: props.errorAction ?? null,
     },
   };
+}
+
+function storageGet(key, props = {}) {
+  return requestHostCapability("storageGet", {
+    ...props,
+    data: { key },
+  });
+}
+
+function storageSet(key, value, props = {}) {
+  return requestHostCapability("storageSet", {
+    ...props,
+    data: { key, value },
+  });
+}
+
+function storageRemove(key, props = {}) {
+  return requestHostCapability("storageRemove", {
+    ...props,
+    data: { key },
+  });
 }
 
 module.exports = {
@@ -164,6 +186,9 @@ module.exports = {
   Checkbox,
   Input,
   Button,
+  storageGet,
+  storageSet,
+  storageRemove,
   __internal: {
     flattenChildren,
     extractText,

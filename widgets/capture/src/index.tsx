@@ -8,12 +8,18 @@ import {
   Spacer,
   Stack,
   Text,
+  storageGet,
+  storageRemove,
+  storageSet,
 } from "@notchapp/api";
 
 export const initialState = {
   draft: "",
   items: [],
+  hasHydrated: false,
 };
+
+export const mountAction = "hydrateItems";
 
 function normalizeText(value) {
   return typeof value === "string" ? value : "";
@@ -36,7 +42,69 @@ function toggleItem(items, id) {
   );
 }
 
+function isPlainObject(value) {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeStoredItems(value) {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item) => {
+      if (!isPlainObject(item)) return null;
+      const id = typeof item.id === "string" ? item.id : null;
+      const title = typeof item.title === "string" ? item.title.trim() : "";
+      const checked = item.checked === true;
+      if (!id || !title) return null;
+
+      return { id, title, checked };
+    })
+    .filter(Boolean);
+}
+
+function withHostCapability(nextState, capability) {
+  if (!capability?.__notchHostCapability) {
+    return nextState;
+  }
+
+  return {
+    __notchNextState: nextState,
+    __notchHostCapability: capability.__notchHostCapability,
+  };
+}
+
+function persistItems(nextState) {
+  const items = Array.isArray(nextState?.items) ? nextState.items : [];
+  if (items.length === 0) {
+    return withHostCapability(nextState, storageRemove("items"));
+  }
+
+  return withHostCapability(nextState, storageSet("items", items));
+}
+
 export const actions = {
+  hydrateItems() {
+    return storageGet("items", {
+      successAction: "hydrateItemsSuccess",
+      errorAction: "hydrateItemsError",
+    });
+  },
+
+  hydrateItemsSuccess(state, context) {
+    return {
+      ...state,
+      items: normalizeStoredItems(context?.payload?.data),
+      hasHydrated: true,
+    };
+  },
+
+  hydrateItemsError(state) {
+    return {
+      ...state,
+      hasHydrated: true,
+    };
+  },
+
   changeDraft(state, context) {
     return {
       ...state,
@@ -54,31 +122,31 @@ export const actions = {
       };
     }
 
-    return {
+    return persistItems({
       ...state,
       draft: "",
       items: [nextItem, ...(state?.items ?? [])],
-    };
+    });
   },
 
   toggleItem(state, context) {
     const id = context?.payload?.id;
     if (!id) return state;
 
-    return {
+    return persistItems({
       ...state,
       items: toggleItem(state?.items ?? [], id),
-    };
+    });
   },
 
   deleteItem(state, context) {
     const id = context?.payload?.id;
     if (!id) return state;
 
-    return {
+    return persistItems({
       ...state,
       items: (state?.items ?? []).filter((item) => item.id !== id),
-    };
+    });
   },
 };
 

@@ -23,11 +23,28 @@ function hostCapabilityFor(value) {
 
   return {
     type: capability.type,
+    data: capability.data ?? null,
     progressAction: typeof capability.progressAction === "string" ? capability.progressAction : null,
     successAction: typeof capability.successAction === "string" ? capability.successAction : null,
     cancelAction: typeof capability.cancelAction === "string" ? capability.cancelAction : null,
     errorAction: typeof capability.errorAction === "string" ? capability.errorAction : null,
   };
+}
+
+function nextStateFor(value) {
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(value, "__notchNextState")) {
+    return value.__notchNextState;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(value, "__notchHostCapability")) {
+    return undefined;
+  }
+
+  return value;
 }
 
 function send(payload) {
@@ -116,13 +133,13 @@ function invokeAction(widgetID, instanceID, actionID, environment, payload) {
   }
 
   const nextState = action(state, { environment, logger, payload });
+  const resolvedNextState = nextStateFor(nextState);
   const hostCapability = hostCapabilityFor(nextState);
+  if (resolvedNextState !== undefined) {
+    widgetStates.get(widgetID).set(instanceID, resolvedNextState);
+  }
   if (hostCapability) {
     return { hostCapability };
-  }
-
-  if (nextState !== undefined) {
-    widgetStates.get(widgetID).set(instanceID, nextState);
   }
 
   return {};
@@ -148,11 +165,25 @@ for await (const line of rl) {
     switch (message.type) {
       case "load":
         loadWidget(message.widgetID, message.bundlePath);
-        send({ requestID: message.requestID, type: "ack", widgetID: message.widgetID });
+        send({
+          requestID: message.requestID,
+          type: "ack",
+          widgetID: message.widgetID,
+          mountAction: typeof ensureWidget(message.widgetID).mod.mountAction === "string"
+            ? ensureWidget(message.widgetID).mod.mountAction
+            : null,
+        });
         break;
       case "reload":
         loadWidget(message.widgetID, message.bundlePath);
-        send({ requestID: message.requestID, type: "ack", widgetID: message.widgetID });
+        send({
+          requestID: message.requestID,
+          type: "ack",
+          widgetID: message.widgetID,
+          mountAction: typeof ensureWidget(message.widgetID).mod.mountAction === "string"
+            ? ensureWidget(message.widgetID).mod.mountAction
+            : null,
+        });
         break;
       case "render": {
         const tree = render(message.widgetID, message.instanceID, message.environment);

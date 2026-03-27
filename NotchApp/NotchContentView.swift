@@ -920,7 +920,7 @@ private struct RuntimeInputNodeView: View {
                     guard let action = node.submitAction else { return }
                     vm.widgetRuntime.triggerAction(
                         action,
-                        payload: RuntimeActionPayload(value: text, id: nil, status: nil, message: nil, count: nil),
+                        payload: RuntimeActionPayload(value: text),
                         for: instanceID
                     )
                 }
@@ -960,7 +960,7 @@ private struct RuntimeInputNodeView: View {
 
             vm.widgetRuntime.triggerAction(
                 action,
-                payload: RuntimeActionPayload(value: newValue, id: nil, status: nil, message: nil, count: nil),
+                payload: RuntimeActionPayload(value: newValue),
                 for: instanceID
             )
         }

@@ -1,6 +1,62 @@
 import Foundation
 import SwiftUI
 
+indirect enum RuntimeJSONValue: Codable, Equatable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case array([RuntimeJSONValue])
+    case object([String: RuntimeJSONValue])
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .number(value)
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode([RuntimeJSONValue].self) {
+            self = .array(value)
+        } else if let value = try? container.decode([String: RuntimeJSONValue].self) {
+            self = .object(value)
+        } else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported JSON value.")
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let value):
+            try container.encode(value)
+        case .number(let value):
+            try container.encode(value)
+        case .bool(let value):
+            try container.encode(value)
+        case .array(let value):
+            try container.encode(value)
+        case .object(let value):
+            try container.encode(value)
+        case .null:
+            try container.encodeNil()
+        }
+    }
+
+    var objectValue: [String: RuntimeJSONValue]? {
+        guard case .object(let value) = self else { return nil }
+        return value
+    }
+
+    var stringValue: String? {
+        guard case .string(let value) = self else { return nil }
+        return value
+    }
+}
+
 struct RuntimeEnvironmentPayload: Codable, Equatable {
     var widgetId: String
     var instanceId: String
@@ -182,13 +238,22 @@ struct RuntimeRenderNode: Codable, Equatable, Identifiable {
 struct RuntimeActionPayload: Codable, Equatable {
     var value: String?
     var id: String?
-    var status: String?
-    var message: String?
-    var count: Int?
+    var data: RuntimeJSONValue?
+
+    init(
+        value: String? = nil,
+        id: String? = nil,
+        data: RuntimeJSONValue? = nil
+    ) {
+        self.value = value
+        self.id = id
+        self.data = data
+    }
 }
 
 private struct RuntimeHostCapabilityRequest: Codable {
     var type: String
+    var data: RuntimeJSONValue?
     var progressAction: String?
     var successAction: String?
     var cancelAction: String?
@@ -247,6 +312,11 @@ private struct RuntimeResponseEnvelope: Codable {
     var message: String?
     var tree: RuntimeRenderNode?
     var hostCapability: RuntimeHostCapabilityRequest?
+    var mountAction: String?
+}
+
+private struct RuntimeWidgetStorageFile: Codable, Equatable {
+    var values: [String: RuntimeJSONValue]
 }
 
 // Host capabilities are generic runtime services that widgets can request
@@ -265,6 +335,7 @@ final class WidgetRuntimeController {
     private var stderrBuffer = Data()
     private var pending: [String: CheckedContinuation<RuntimeResponseEnvelope, Error>] = [:]
     private var loadedWidgetIDs: Set<String> = []
+    private var mountActionByWidgetID: [String: String] = [:]
     private var mountedWidgets: [UUID: RuntimeMountedWidget] = [:]
     private var developmentWidgetIDs: Set<String> = []
     private let jsonEncoder = JSONEncoder()
@@ -285,7 +356,11 @@ final class WidgetRuntimeController {
 
         Task {
             await ensureLoaded(definition)
-            await renderInstance(instanceID)
+            if let mountAction = mountActionByWidgetID[definition.id] {
+                await performAction(mountAction, payload: nil, mounted: mountedWidgets[instanceID]!)
+            } else {
+                await renderInstance(instanceID)
+            }
         }
     }
 
@@ -312,27 +387,7 @@ final class WidgetRuntimeController {
         guard let mounted = mountedWidgets[instanceID] else { return }
         Task {
             await ensureLoaded(mounted.definition)
-            do {
-                let response = try await sendRequest(
-                    RuntimeRequestEnvelope(
-                        requestID: UUID().uuidString,
-                        type: "action",
-                        widgetID: mounted.definition.id,
-                        instanceID: instanceID.uuidString,
-                        bundlePath: nil,
-                        actionID: actionID,
-                        payload: payload,
-                        environment: mounted.environment
-                    )
-                )
-                if let hostCapability = response.hostCapability {
-                    await handleHostCapability(hostCapability, for: instanceID)
-                } else {
-                    await renderInstance(instanceID)
-                }
-            } catch {
-                errorByInstance[instanceID] = error.localizedDescription
-            }
+            await performAction(actionID, payload: payload, mounted: mounted)
         }
     }
 
@@ -432,7 +487,7 @@ final class WidgetRuntimeController {
         guard loadedWidgetIDs.contains(definition.id) == false else { return }
 
         do {
-            _ = try await sendRequest(
+            let response = try await sendRequest(
                 RuntimeRequestEnvelope(
                     requestID: UUID().uuidString,
                     type: "load",
@@ -444,6 +499,11 @@ final class WidgetRuntimeController {
                     environment: nil
                 )
             )
+            if let mountAction = response.mountAction {
+                mountActionByWidgetID[definition.id] = mountAction
+            } else {
+                mountActionByWidgetID.removeValue(forKey: definition.id)
+            }
             loadedWidgetIDs.insert(definition.id)
         } catch {
             isAvailable = false
@@ -676,6 +736,7 @@ final class WidgetRuntimeController {
 
     private func handleBuildSuccess(widgetID: String) async {
         loadedWidgetIDs.remove(widgetID)
+        mountActionByWidgetID.removeValue(forKey: widgetID)
 
         let refreshedDefinitions = WidgetCatalog.discover(log: log)
         let matchingDefinition = refreshedDefinitions.first(where: { $0.id == widgetID })
@@ -712,8 +773,170 @@ final class WidgetRuntimeController {
     private func handleHostCapability(_ hostCapability: RuntimeHostCapabilityRequest, for instanceID: UUID) async {
         guard let mounted = mountedWidgets[instanceID] else { return }
 
-        log.write("Widget \(mounted.definition.id) [warn]: Unsupported host capability \(hostCapability.type)")
-        await renderInstance(instanceID)
+        switch hostCapability.type {
+        case "storageGet":
+            await handleStorageGet(hostCapability, mounted: mounted)
+        case "storageSet":
+            await handleStorageSet(hostCapability, mounted: mounted)
+        case "storageRemove":
+            await handleStorageRemove(hostCapability, mounted: mounted)
+        default:
+            log.write("Widget \(mounted.definition.id) [warn]: Unsupported host capability \(hostCapability.type)")
+            await renderInstance(instanceID)
+        }
+    }
+
+    private func performAction(_ actionID: String, payload: RuntimeActionPayload?, mounted: RuntimeMountedWidget) async {
+        do {
+            let response = try await sendRequest(
+                RuntimeRequestEnvelope(
+                    requestID: UUID().uuidString,
+                    type: "action",
+                    widgetID: mounted.definition.id,
+                    instanceID: mounted.instanceID.uuidString,
+                    bundlePath: nil,
+                    actionID: actionID,
+                    payload: payload,
+                    environment: mounted.environment
+                )
+            )
+            if let hostCapability = response.hostCapability {
+                await renderInstance(mounted.instanceID)
+                await handleHostCapability(hostCapability, for: mounted.instanceID)
+            } else {
+                await renderInstance(mounted.instanceID)
+            }
+        } catch {
+            errorByInstance[mounted.instanceID] = error.localizedDescription
+        }
+    }
+
+    private func handleStorageGet(_ hostCapability: RuntimeHostCapabilityRequest, mounted: RuntimeMountedWidget) async {
+        guard let key = hostCapability.data?.objectValue?["key"]?.stringValue else {
+            await dispatchHostCapabilityError("Missing storage key.", hostCapability: hostCapability, mounted: mounted)
+            return
+        }
+
+        let store = loadWidgetStorage(for: mounted)
+        let value = store[key] ?? .null
+
+        if let successAction = hostCapability.successAction {
+            await dispatchFollowUpAction(
+                successAction,
+                payload: RuntimeActionPayload(data: value),
+                mounted: mounted
+            )
+        } else {
+            await renderInstance(mounted.instanceID)
+        }
+    }
+
+    private func handleStorageSet(_ hostCapability: RuntimeHostCapabilityRequest, mounted: RuntimeMountedWidget) async {
+        guard let data = hostCapability.data?.objectValue,
+              let key = data["key"]?.stringValue,
+              let value = data["value"] else {
+            await dispatchHostCapabilityError("Invalid storageSet payload.", hostCapability: hostCapability, mounted: mounted)
+            return
+        }
+
+        var store = loadWidgetStorage(for: mounted)
+        store[key] = value
+
+        do {
+            try writeWidgetStorage(store, for: mounted)
+            if let successAction = hostCapability.successAction {
+                await dispatchFollowUpAction(
+                    successAction,
+                    payload: RuntimeActionPayload(data: value),
+                    mounted: mounted
+                )
+            }
+        } catch {
+            await dispatchHostCapabilityError(error.localizedDescription, hostCapability: hostCapability, mounted: mounted)
+        }
+    }
+
+    private func handleStorageRemove(_ hostCapability: RuntimeHostCapabilityRequest, mounted: RuntimeMountedWidget) async {
+        guard let key = hostCapability.data?.objectValue?["key"]?.stringValue else {
+            await dispatchHostCapabilityError("Missing storage key.", hostCapability: hostCapability, mounted: mounted)
+            return
+        }
+
+        var store = loadWidgetStorage(for: mounted)
+        store.removeValue(forKey: key)
+
+        do {
+            try writeWidgetStorage(store, for: mounted)
+            if let successAction = hostCapability.successAction {
+                await dispatchFollowUpAction(
+                    successAction,
+                    payload: RuntimeActionPayload(data: .null),
+                    mounted: mounted
+                )
+            }
+        } catch {
+            await dispatchHostCapabilityError(error.localizedDescription, hostCapability: hostCapability, mounted: mounted)
+        }
+    }
+
+    private func dispatchHostCapabilityError(
+        _ message: String,
+        hostCapability: RuntimeHostCapabilityRequest,
+        mounted: RuntimeMountedWidget
+    ) async {
+        if let errorAction = hostCapability.errorAction {
+            await dispatchFollowUpAction(
+                errorAction,
+                payload: RuntimeActionPayload(
+                    data: .object([
+                        "kind": .string("error"),
+                        "message": .string(message),
+                    ])
+                ),
+                mounted: mounted
+            )
+        } else {
+            log.write("Widget \(mounted.definition.id) [error]: \(message)")
+        }
+    }
+
+    private func widgetStorageFileURL(for mounted: RuntimeMountedWidget) -> URL {
+        RepoPaths.applicationSupportRoot
+            .appendingPathComponent("WidgetStorage", isDirectory: true)
+            .appendingPathComponent(mounted.definition.id, isDirectory: true)
+            .appendingPathComponent("\(mounted.instanceID.uuidString).json")
+    }
+
+    private func loadWidgetStorage(for mounted: RuntimeMountedWidget) -> [String: RuntimeJSONValue] {
+        let fileURL = widgetStorageFileURL(for: mounted)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return [:]
+        }
+
+        do {
+            let data = try Data(contentsOf: fileURL)
+            let file = try jsonDecoder.decode(RuntimeWidgetStorageFile.self, from: data)
+            return file.values
+        } catch {
+            log.write("Widget \(mounted.definition.id) [warn]: Failed to read widget storage: \(error.localizedDescription)")
+            return [:]
+        }
+    }
+
+    private func writeWidgetStorage(_ values: [String: RuntimeJSONValue], for mounted: RuntimeMountedWidget) throws {
+        let fileURL = widgetStorageFileURL(for: mounted)
+        let directoryURL = fileURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+
+        if values.isEmpty {
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                try FileManager.default.removeItem(at: fileURL)
+            }
+            return
+        }
+
+        let data = try jsonEncoder.encode(RuntimeWidgetStorageFile(values: values))
+        try data.write(to: fileURL, options: .atomic)
     }
 
     private func dispatchFollowUpAction(
