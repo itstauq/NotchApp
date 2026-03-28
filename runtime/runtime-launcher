@@ -67,14 +67,14 @@ PY
 bootstrap_deps() {
   if [ ! -d "$SDK_ROOT/node_modules/notchapp" ]; then
     echo "Installing widget tooling dependencies..."
-    "$NPM_BIN" install --prefix "$SDK_ROOT"
+    "$NPM_BIN" ci --prefix "$SDK_ROOT"
   fi
 }
 
 bootstrap_runtime_deps() {
   if [ -f "$RUNTIME_ROOT/package.json" ] && [ ! -d "$RUNTIME_ROOT/node_modules/react" ]; then
     echo "Installing widget runtime dependencies..."
-    "$NPM_BIN" install --prefix "$RUNTIME_ROOT"
+    "$NPM_BIN" ci --prefix "$RUNTIME_ROOT"
   fi
 }
 

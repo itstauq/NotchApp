@@ -677,12 +677,38 @@ private struct RuntimeV2NodeView: View {
         case "Text", "__text":
             Text(node.string("text") ?? "")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.72))
+                .foregroundStyle(textColor)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        case "Button":
+            Button(action: {}) {
+                Text(node.string("title") ?? "Action")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.95))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.white.opacity(0.14))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
         case "Spacer":
             Spacer(minLength: 0)
         default:
             EmptyView()
+        }
+    }
+
+    private var textColor: Color {
+        switch node.string("tone") {
+        case "secondary":
+            return .white.opacity(0.58)
+        default:
+            return .white.opacity(0.72)
         }
     }
 }

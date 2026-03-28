@@ -205,11 +205,20 @@ async function buildWidget(targetPackageDir, options = {}) {
     entryPoints: [entryFile],
     outfile,
     bundle: true,
-    platform: "node",
+    platform: "browser",
     format: "cjs",
-    target: "node22",
+    target: "es2022",
     jsx: "automatic",
     jsxImportSource: "@notchapp/api",
+    alias: {
+      react: "react-shim",
+      "react/jsx-runtime": "@notchapp/api/jsx-runtime",
+    },
+    external: [
+      "@notchapp/api",
+      "@notchapp/api/jsx-runtime",
+      "react-shim",
+    ],
     sourcemap: "inline",
     logLevel: "silent",
   });
