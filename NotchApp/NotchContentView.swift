@@ -578,7 +578,7 @@ private struct RuntimeWidgetSurface: View {
             if let error = vm.widgetRuntime.error(for: widget.id) {
                 runtimeErrorSurface(message: error)
             } else if let tree = vm.widgetRuntime.renderTree(for: widget.id) {
-                RuntimeV2NodeView(node: tree)
+                RuntimeV2NodeView(node: tree, vm: vm, instanceID: widget.id, path: [])
             } else {
                 runtimeLoadingSurface
             }
@@ -659,19 +659,22 @@ private struct RuntimeWidgetSurface: View {
 
 private struct RuntimeV2NodeView: View {
     var node: RenderNodeV2
+    var vm: NotchViewModel
+    var instanceID: UUID
+    var path: [Int]
 
     var body: some View {
         switch node.type {
         case "Stack":
             VStack(alignment: .leading, spacing: CGFloat(node.number("spacing") ?? 8)) {
-                ForEach(Array(node.children.enumerated()), id: \.offset) { _, child in
-                    RuntimeV2NodeView(node: child)
+                ForEach(Array(node.children.enumerated()), id: \.offset) { index, child in
+                    RuntimeV2NodeView(node: child, vm: vm, instanceID: instanceID, path: path + [index])
                 }
             }
         case "Inline":
             HStack(spacing: CGFloat(node.number("spacing") ?? 8)) {
-                ForEach(Array(node.children.enumerated()), id: \.offset) { _, child in
-                    RuntimeV2NodeView(node: child)
+                ForEach(Array(node.children.enumerated()), id: \.offset) { index, child in
+                    RuntimeV2NodeView(node: child, vm: vm, instanceID: instanceID, path: path + [index])
                 }
             }
         case "Text", "__text":
@@ -680,7 +683,9 @@ private struct RuntimeV2NodeView: View {
                 .foregroundStyle(textColor)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case "Button":
-            Button(action: {}) {
+            Button {
+                vm.widgetRuntime.triggerCallback(for: instanceID, at: path)
+            } label: {
                 Text(node.string("title") ?? "Action")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.95))
@@ -696,6 +701,7 @@ private struct RuntimeV2NodeView: View {
                     )
             }
             .buttonStyle(.plain)
+            .disabled(node.string("onPress") == nil)
         case "Spacer":
             Spacer(minLength: 0)
         default:

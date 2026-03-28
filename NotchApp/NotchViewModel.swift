@@ -238,6 +238,13 @@ private struct RuntimeTerminateParams: Encodable {
     var sessionId: String
 }
 
+private struct RuntimeCallbackParams: Encodable {
+    var instanceId: String
+    var sessionId: String
+    var callbackId: String
+    var payload: RuntimeJSONValue
+}
+
 private struct RuntimeLegacyRenderParams: Encodable {
     var widgetID: String?
     var instanceID: String?
@@ -364,6 +371,35 @@ final class WidgetRuntimeController {
         _ = actionID
         _ = payload
         _ = instanceID
+    }
+
+    func triggerCallback(
+        prop: String = "onPress",
+        for instanceID: UUID,
+        at path: [Int],
+        payload: RuntimeJSONValue = .object([:])
+    ) {
+        guard let root = renderTreeByInstance[instanceID],
+              let node = node(at: path, in: root),
+              let callbackID = node.string(prop),
+              let sessionID = sessionManager.knownSessionID(for: instanceID) else {
+            return
+        }
+
+        do {
+            try transport.sendNotification(
+                "callback",
+                params: RuntimeCallbackParams(
+                    instanceId: instanceID.uuidString,
+                    sessionId: sessionID,
+                    callbackId: callbackID,
+                    payload: payload
+                ),
+                configuration: try processConfiguration()
+            )
+        } catch {
+            log.write("Widget runtime: callback failed for \(instanceID.uuidString): \(error.localizedDescription)")
+        }
     }
 
     func renderTree(for instanceID: UUID) -> RenderNodeV2? {
@@ -671,6 +707,17 @@ final class WidgetRuntimeController {
 
     private func decode<Result: Decodable>(_ value: RuntimeJSONValue?, as type: Result.Type) throws -> Result {
         try (value ?? .null).decode(as: type, using: jsonDecoder)
+    }
+
+    private func node(at path: [Int], in root: RenderNodeV2) -> RenderNodeV2? {
+        var current = root
+        for index in path {
+            guard current.children.indices.contains(index) else {
+                return nil
+            }
+            current = current.children[index]
+        }
+        return current
     }
 
     private func handleBuildSuccess(widgetID: String) async {

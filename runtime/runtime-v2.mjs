@@ -440,6 +440,33 @@ function terminateWidget(params = {}, requestId) {
   return false;
 }
 
+function forwardCallback(params = {}) {
+  const instanceID = typeof params.instanceId === "string" ? params.instanceId : "";
+  const sessionID = typeof params.sessionId === "string" ? params.sessionId : "";
+  const callbackID = typeof params.callbackId === "string" ? params.callbackId : "";
+  if (!instanceID || !sessionID || !callbackID) {
+    return;
+  }
+
+  const entry = workers.get(instanceID);
+  if (!entry || entry.sessionId !== sessionID || entry.isTerminating) {
+    return;
+  }
+
+  try {
+    entry.worker.postMessage({
+      jsonrpc: "2.0",
+      method: "callback",
+      params: {
+        callbackId: callbackID,
+        payload: params.payload ?? {},
+      },
+    });
+  } catch {
+    // The worker may already be gone.
+  }
+}
+
 function shutdownRuntime() {
   beginShutdown(0);
 }
@@ -502,6 +529,9 @@ for await (const line of rl) {
         if (terminateWidget(message.params, message.id)) {
           respond(message.id, null);
         }
+        break;
+      case "callback":
+        forwardCallback(message.params);
         break;
       case "shutdown":
         shutdownRuntime();

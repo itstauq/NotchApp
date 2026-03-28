@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { parentPort, workerData } from "node:worker_threads";
 
-import { clear as clearCallbacks } from "./callback-registry.mjs";
+import { clear as clearCallbacks, invoke as invokeCallback } from "./callback-registry.mjs";
 import { createRenderer } from "./reconciler.mjs";
 
 if (!parentPort) {
@@ -138,6 +138,24 @@ renderer.render(
 
 parentPort.on("message", (message) => {
   if (message?.jsonrpc !== "2.0" || typeof message.method !== "string") {
+    return;
+  }
+
+  if (message.method === "callback") {
+    const callbackId = typeof message.params?.callbackId === "string"
+      ? message.params.callbackId
+      : "";
+    if (!callbackId) {
+      return;
+    }
+
+    const result = invokeCallback(callbackId, message.params?.payload ?? {});
+    if (result && typeof result.then === "function") {
+      result.catch((error) => {
+        reportError(error instanceof Error ? error : new Error(String(error)));
+        process.exit(1);
+      });
+    }
     return;
   }
 
