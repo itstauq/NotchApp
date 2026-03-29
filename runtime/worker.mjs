@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { parentPort, workerData } from "node:worker_threads";
 
 import { clear as clearCallbacks, invoke as invokeCallback } from "./callback-registry.mjs";
+import { createRuntimeFetch } from "./fetch.mjs";
 import { createRenderer } from "./reconciler.mjs";
 import { createStorage } from "./storage.mjs";
 
@@ -48,6 +49,7 @@ const React = require("react");
 const renderer = createRenderer();
 let currentProps = props ?? {};
 let nextRpcRequestId = 0;
+let nextHostApiRequestId = 0;
 const pendingRpcRequests = new Map();
 let storage = createStorage({ callRpc: () => Promise.resolve(null) });
 
@@ -72,6 +74,10 @@ function sendRequest(method, params) {
   return new Promise((resolve, reject) => {
     pendingRpcRequests.set(requestId, { resolve, reject });
   });
+}
+
+function createHostApiRequestId() {
+  return `${sessionId}:host:${++nextHostApiRequestId}`;
 }
 
 function stringifyLogPart(part) {
@@ -217,6 +223,10 @@ async function bootstrap() {
   storage = createStorage({
     initialValues: storageSnapshot,
     callRpc,
+  });
+  globalThis.fetch = createRuntimeFetch({
+    callRpc,
+    createRequestId: createHostApiRequestId,
   });
 
   globalThis.__NOTCH_RUNTIME__ = {

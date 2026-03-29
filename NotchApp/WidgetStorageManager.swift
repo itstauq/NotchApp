@@ -85,7 +85,7 @@ final class WidgetStorageManager {
         default:
             throw RuntimeTransportRPCError(
                 code: -32601,
-                message: "Unsupported capability RPC '\(method)'.",
+                message: "Unsupported local storage RPC '\(method)'.",
                 data: nil
             )
         }

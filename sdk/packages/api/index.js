@@ -1,5 +1,8 @@
 const React = require("react");
 const { useLocalStorage } = require("./hooks/useLocalStorage");
+const { usePromise } = require("./hooks/usePromise");
+const { useFetch } = require("./hooks/useFetch");
+const { openURL } = require("./functions/openURL");
 const { LocalStorage } = require("./runtime");
 
 function Stack(props = {}) {
@@ -20,4 +23,7 @@ module.exports = {
   Button,
   LocalStorage,
   useLocalStorage,
+  usePromise,
+  useFetch,
+  openURL,
 };

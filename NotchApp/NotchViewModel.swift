@@ -249,18 +249,6 @@ private struct RuntimeRequestFullTreeParams: Encodable {
     var sessionId: String
 }
 
-private struct RuntimeRPCRequestParams: Decodable {
-    var instanceId: String
-    var sessionId: String
-    var method: String
-    var params: RuntimeJSONValue?
-}
-
-private struct RuntimeRPCResponsePayload: Encodable {
-    var sessionId: String
-    var value: RuntimeJSONValue
-}
-
 private struct RuntimeLegacyRenderParams: Encodable {
     var widgetID: String?
     var instanceID: String?
@@ -297,12 +285,24 @@ final class WidgetRuntimeController {
     private let transport = RuntimeTransport()
     private let sessionManager = WidgetSessionManager()
     private let storageManager = WidgetStorageManager(log: { FileLog().write($0) })
+    @ObservationIgnored private var hostAPI: WidgetHostAPI!
     private var mountedWidgets: [UUID: RuntimeMountedWidget] = [:]
     private var developmentWidgetIDs: Set<String> = []
     private let jsonDecoder = JSONDecoder()
     private let jsonEncoder = JSONEncoder()
 
     init() {
+        hostAPI = WidgetHostAPI(
+            sessionManager: sessionManager,
+            storage: storageManager,
+            network: WidgetHostNetworkService(),
+            resolveWidgetID: { [weak self] instanceID in
+                self?.mountedWidgets[instanceID]?.definition.id
+            },
+            log: { [weak self] message in
+                self?.log.write(message)
+            }
+        )
         transport.notificationHandler = { [weak self] notification in
             self?.handle(notification)
         }
@@ -782,68 +782,7 @@ final class WidgetRuntimeController {
     }
 
     private func handle(_ request: RuntimeTransportRequest) async throws -> RuntimeJSONValue? {
-        guard request.method == "rpc" else {
-            throw RuntimeTransportRPCError(
-                code: -32601,
-                message: "Unsupported runtime request '\(request.method)'.",
-                data: nil
-            )
-        }
-
-        let params: RuntimeRPCRequestParams
-        do {
-            params = try decode(request.params, as: RuntimeRPCRequestParams.self)
-        } catch {
-            throw RuntimeTransportRPCError(
-                code: -32602,
-                message: "Invalid runtime RPC params: \(error.localizedDescription)",
-                data: nil
-            )
-        }
-
-        guard let instanceID = UUID(uuidString: params.instanceId),
-              let mounted = mountedWidgets[instanceID] else {
-            throw RuntimeTransportRPCError(
-                code: -32001,
-                message: "Unknown widget instance '\(params.instanceId)'.",
-                data: nil
-            )
-        }
-
-        guard sessionManager.acceptsWorkerSession(instanceID: instanceID, sessionId: params.sessionId) else {
-            throw RuntimeTransportRPCError(
-                code: -32004,
-                message: "Session mismatch for instance '\(params.instanceId)'.",
-                data: nil
-            )
-        }
-
-        do {
-            let result = try storageManager.handleRPC(
-                widgetID: mounted.definition.id,
-                instanceID: params.instanceId,
-                method: params.method,
-                params: params.params
-            )
-
-            return try encodeRuntimeJSONValue(
-                RuntimeRPCResponsePayload(
-                    sessionId: params.sessionId,
-                    value: result
-                )
-            )
-        } catch let rpcError as RuntimeTransportRPCError {
-            throw rpcError
-        } catch {
-            log.write(
-                "Widget runtime: capability RPC \(params.method) failed for \(params.instanceId): \(error.localizedDescription)"
-            )
-            throw RuntimeTransportRPCError(
-                code: -32000,
-                message: error.localizedDescription,
-                data: nil
-            )
-        }
+        try await hostAPI.handle(request)
     }
 
     private func handleBuildSuccess(widgetID: String) async {
