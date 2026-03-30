@@ -96,6 +96,10 @@ function Icon(props = {}) {
   return createHostElement("Icon", props);
 }
 
+function Image(props = {}) {
+  return createHostElement("Image", props);
+}
+
 function Button(props = {}) {
   return createHostElement("Button", props);
 }
@@ -138,6 +142,7 @@ module.exports = {
   Spacer,
   Text,
   Icon,
+  Image,
   Button,
   Row,
   IconButton,

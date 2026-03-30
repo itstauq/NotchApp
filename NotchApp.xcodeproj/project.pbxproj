@@ -33,6 +33,8 @@
 			A10000280000000000000028 /* WidgetHostAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000200000000000000020; };
 			A10000300000000000000030 /* WidgetHostAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000200000000000000020; };
 			A10000290000000000000029 /* WidgetHostAPITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000210000000000000021; };
+			A10000310000000000000031 /* WidgetAssetResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000220000000000000022; };
+			A10000320000000000000032 /* WidgetAssetResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000220000000000000022; };
 			A10000240000000000000024 /* SQLCipher in Frameworks */ = {isa = PBXBuildFile; productRef = C10000020000000000000002 /* SQLCipher */; };
 			A10000250000000000000025 /* SQLCipher in Frameworks */ = {isa = PBXBuildFile; productRef = C10000030000000000000003 /* SQLCipher */; };
 /* End PBXBuildFile section */
@@ -54,6 +56,7 @@
 			A20000190000000000000019 /* Preferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Preferences.swift; sourceTree = "<group>"; };
 			A20000200000000000000020 /* WidgetHostAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetHostAPI.swift; sourceTree = "<group>"; };
 			A20000210000000000000021 /* WidgetHostAPITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetHostAPITests.swift; sourceTree = "<group>"; };
+			A20000220000000000000022 /* WidgetAssetResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetAssetResolver.swift; sourceTree = "<group>"; };
 			A20000090000000000000009 /* SavedViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedViews.swift; sourceTree = "<group>"; };
 			A20000100000000000000010 /* ViewSwitcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewSwitcher.swift; sourceTree = "<group>"; };
 		A20000060000000000000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -107,6 +110,7 @@
 					A20000180000000000000018 /* WidgetStorageEngine.swift */,
 					A20000190000000000000019 /* Preferences.swift */,
 					A20000200000000000000020 /* WidgetHostAPI.swift */,
+					A20000220000000000000022 /* WidgetAssetResolver.swift */,
 					A20000090000000000000009 /* SavedViews.swift */,
 					A20000100000000000000010 /* ViewSwitcher.swift */,
 					A20000060000000000000006 /* Assets.xcassets */,
@@ -266,6 +270,7 @@
 					A10000220000000000000022 /* WidgetStorageEngine.swift in Sources */,
 					A10000260000000000000026 /* Preferences.swift in Sources */,
 					A10000280000000000000028 /* WidgetHostAPI.swift in Sources */,
+					A10000310000000000000031 /* WidgetAssetResolver.swift in Sources */,
 					A10000080000000000000008 /* SavedViews.swift in Sources */,
 					A10000090000000000000009 /* ViewSwitcher.swift in Sources */,
 				);
@@ -284,6 +289,7 @@
 					A10000230000000000000023 /* WidgetStorageEngine.swift in Sources */,
 					A10000270000000000000027 /* Preferences.swift in Sources */,
 					A10000300000000000000030 /* WidgetHostAPI.swift in Sources */,
+					A10000320000000000000032 /* WidgetAssetResolver.swift in Sources */,
 					A10000290000000000000029 /* WidgetHostAPITests.swift in Sources */,
 				);
 				runOnlyForDeploymentPostprocessing = 0;

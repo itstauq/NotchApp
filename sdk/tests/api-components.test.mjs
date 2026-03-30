@@ -64,6 +64,7 @@ test("@notchapp/api exports the extended non-image component surface", () => {
     "Spacer",
     "Text",
     "Icon",
+    "Image",
     "Button",
     "Row",
     "IconButton",
@@ -99,6 +100,10 @@ test("component wrappers emit host elements with the expected props", () => {
     fill: "#111111",
     overlay: api.IconButton({ key: "overlay-plus", symbol: "plus", onPress: () => {} }),
   });
+  const image = api.Image({
+    src: "assets/cover.png",
+    opacity: 0.8,
+  });
   const inputChildren = Array.isArray(input.props.children) ? input.props.children : [input.props.children];
   const roundedRectChildren = Array.isArray(roundedRect.props.children)
     ? roundedRect.props.children
@@ -107,9 +112,12 @@ test("component wrappers emit host elements with the expected props", () => {
   assert.equal(row.type, "Row");
   assert.equal(input.type, "Input");
   assert.equal(roundedRect.type, "RoundedRect");
+  assert.equal(image.type, "Image");
 
   assert.equal(input.props.value, "Draft");
   assert.equal(input.props.placeholder, "Type");
+  assert.equal(image.props.src, "assets/cover.png");
+  assert.equal(image.props.opacity, 0.8);
   assert.equal(Array.isArray(row.props.children), true);
   assert.equal(inputChildren[0].type, "__notch_trailingAccessory");
   assert.equal(inputChildren[0].props.children.type, "Icon");

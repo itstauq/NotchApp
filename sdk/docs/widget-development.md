@@ -18,6 +18,7 @@ Minimal layout:
 ```text
 my-widget/
   package.json
+  assets/
   src/
     index.tsx
 ```
@@ -67,6 +68,7 @@ npm run dev
 `notchapp dev` is the main development workflow. It:
 
 - builds your widget into `.notch/build/index.cjs`
+- copies package-local assets into `.notch/build/assets`
 - registers the local widget with NotchApp for development
 - watches `package.json`, `src/`, and `assets/`
 - rebuilds and reloads the widget whenever you save changes
@@ -172,6 +174,7 @@ Current validation rules:
 - `Spacer`
 - `Text`
 - `Icon`
+- `Image`
 - `Button`
 - `Row`
 - `IconButton`
@@ -183,3 +186,21 @@ Current validation rules:
 - `RoundedRect`
 
 The fastest reference is the starter widget in [sdk/examples/hello](/Users/tauquir/Projects/NotchApp2/sdk/examples/hello).
+
+## Local Images
+
+For local widget images, place files under your package `assets/` directory and reference them with package-relative paths:
+
+```tsx
+import { Image, RoundedRect } from "@notchapp/api";
+
+export default function Widget() {
+  return (
+    <RoundedRect frame={{ width: 56, height: 56 }} clipShape={{ type: "roundedRect", cornerRadius: 14 }}>
+      <Image src="assets/cover.png" />
+    </RoundedRect>
+  );
+}
+```
+
+`notchapp build` and `notchapp dev` copy `assets/` into `.notch/build/assets`, so `src="assets/cover.png"` works in both local development and packaged widget installs.

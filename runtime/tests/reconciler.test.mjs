@@ -43,13 +43,14 @@ test("reconciler serializes the new component wrappers into v2 host nodes", () =
     React.createElement(
       "Stack",
       { spacing: 12, alignment: "center" },
-      React.createElement(
-        "Inline",
-        { spacing: 6, alignment: "top" },
-        React.createElement("Icon", { symbol: "star.fill", size: 16 }),
-        React.createElement("Text", { tone: "secondary", lineClamp: 1 }, "Hello"),
-        React.createElement("Spacer", { minLength: 4 })
-      ),
+        React.createElement(
+          "Inline",
+          { spacing: 6, alignment: "top" },
+          React.createElement("Icon", { symbol: "star.fill", size: 16 }),
+          React.createElement("Image", { src: "assets/cover.png" }),
+          React.createElement("Text", { tone: "secondary", lineClamp: 1 }, "Hello"),
+          React.createElement("Spacer", { minLength: 4 })
+        ),
       React.createElement(
         "ScrollView",
         { spacing: 8, fadeEdges: "both" },
@@ -67,8 +68,10 @@ test("reconciler serializes the new component wrappers into v2 host nodes", () =
   assert.equal(tree.type, "Stack");
   assert.equal(tree.children[0].type, "Inline");
   assert.equal(tree.children[0].children[0].type, "Icon");
-  assert.equal(tree.children[0].children[1].type, "Text");
-  assert.equal(tree.children[0].children[2].type, "Spacer");
+  assert.equal(tree.children[0].children[1].type, "Image");
+  assert.equal(tree.children[0].children[1].props.src, "assets/cover.png");
+  assert.equal(tree.children[0].children[2].type, "Text");
+  assert.equal(tree.children[0].children[3].type, "Spacer");
 
   assert.equal(tree.children[1].type, "ScrollView");
   assert.equal(tree.children[1].children[0].type, "Divider");

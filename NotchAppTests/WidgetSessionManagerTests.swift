@@ -228,6 +228,47 @@ final class WidgetSessionManagerTests: XCTestCase {
         XCTAssertNotNil(Color(hex: "#112233CC"))
         XCTAssertNil(Color(hex: "#XYZXYZ"))
     }
+
+    func testWidgetAssetResolverResolvesLocalAssetsInsideBuildDirectory() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent(".notch/build/assets", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        defer {
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let assetRootURL = WidgetAssetResolver.assetRootURL(forPackageDirectoryURL: root)
+
+        XCTAssertEqual(
+            assetRootURL.path,
+            root.appendingPathComponent(".notch/build", isDirectory: true).path
+        )
+        XCTAssertEqual(
+            WidgetAssetResolver.assetURL(for: "assets/icon.png", under: assetRootURL)?.path,
+            root.appendingPathComponent(".notch/build/assets/icon.png").path
+        )
+        XCTAssertEqual(
+            WidgetAssetResolver.assetURL(for: "./assets/icon.png", under: assetRootURL)?.path,
+            root.appendingPathComponent(".notch/build/assets/icon.png").path
+        )
+    }
+
+    func testWidgetAssetResolverRejectsEscapingAndAbsoluteAssetPaths() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let assetRootURL = WidgetAssetResolver.assetRootURL(forPackageDirectoryURL: root)
+
+        XCTAssertNil(WidgetAssetResolver.assetURL(for: "../secret.png", under: assetRootURL))
+        XCTAssertNil(WidgetAssetResolver.assetURL(for: "/tmp/secret.png", under: assetRootURL))
+        XCTAssertNil(WidgetAssetResolver.assetURL(for: "file:///tmp/secret.png", under: assetRootURL))
+    }
 }
 
 private func stackNode(children: [RuntimeJSONValue]) -> RuntimeJSONValue {

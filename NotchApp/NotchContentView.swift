@@ -582,7 +582,13 @@ private struct RuntimeWidgetSurface: View {
             if let error = vm.widgetRuntime.error(for: widget.id) {
                 runtimeErrorSurface(message: error)
             } else if let tree = vm.widgetRuntime.renderTree(for: widget.id) {
-                RuntimeV2NodeView(node: tree, vm: vm, instanceID: widget.id, path: [])
+                RuntimeV2NodeView(
+                    node: tree,
+                    vm: vm,
+                    instanceID: widget.id,
+                    assetRootURL: definition.assetRootURL,
+                    path: []
+                )
             } else {
                 runtimeLoadingSurface
             }
@@ -665,6 +671,7 @@ private struct RuntimeV2NodeView: View {
     var node: RenderNodeV2
     var vm: NotchViewModel
     var instanceID: UUID
+    var assetRootURL: URL
     var path: [Int]
 
     var body: some View {
@@ -727,6 +734,13 @@ private struct RuntimeV2NodeView: View {
                     )
                     .foregroundStyle(iconColor)
             )
+        case "Image":
+            return AnyView(
+                RuntimeV2ImageNodeView(
+                    source: node.string("src"),
+                    assetRootURL: assetRootURL
+                )
+            )
         case "Button":
             return AnyView(
                 Button {
@@ -762,7 +776,13 @@ private struct RuntimeV2NodeView: View {
                         .frame(height: 34)
                         .overlay {
                             if node.children.count == 1 {
-                                RuntimeV2NodeView(node: node.children[0], vm: vm, instanceID: instanceID, path: path + [0])
+                                RuntimeV2NodeView(
+                                    node: node.children[0],
+                                    vm: vm,
+                                    instanceID: instanceID,
+                                    assetRootURL: assetRootURL,
+                                    path: path + [0]
+                                )
                                     .padding(.horizontal, 10)
                             } else {
                                 HStack(spacing: 8) {
@@ -816,7 +836,13 @@ private struct RuntimeV2NodeView: View {
             )
         case "Input":
             return AnyView(
-                RuntimeV2InputNodeView(node: node, vm: vm, instanceID: instanceID, path: path)
+                RuntimeV2InputNodeView(
+                    node: node,
+                    vm: vm,
+                    instanceID: instanceID,
+                    assetRootURL: assetRootURL,
+                    path: path
+                )
             )
         case "Circle":
             return circleView
@@ -832,7 +858,13 @@ private struct RuntimeV2NodeView: View {
     @ViewBuilder
     private var childViews: some View {
         ForEach(indexedChildren) { child in
-            RuntimeV2NodeView(node: child.node, vm: vm, instanceID: instanceID, path: path + [child.index])
+            RuntimeV2NodeView(
+                node: child.node,
+                vm: vm,
+                instanceID: instanceID,
+                assetRootURL: assetRootURL,
+                path: path + [child.index]
+            )
         }
     }
 
@@ -969,6 +1001,10 @@ private struct RuntimeV2NodeView: View {
             view = applyFrame(frame, to: view)
         }
 
+        if node.type == "Image" {
+            view = AnyView(view.clipped())
+        }
+
         if let backgroundColor = RuntimeV2StyleResolver.color(hex: node.string("background")) {
             view = AnyView(view.background(backgroundColor))
         }
@@ -985,7 +1021,13 @@ private struct RuntimeV2NodeView: View {
             for overlay in overlays {
                 view = AnyView(
                     view.overlay(alignment: RuntimeV2StyleResolver.alignment(overlay.alignment)) {
-                        RuntimeV2NodeView(node: overlay.node, vm: vm, instanceID: instanceID, path: path)
+                        RuntimeV2NodeView(
+                            node: overlay.node,
+                            vm: vm,
+                            instanceID: instanceID,
+                            assetRootURL: assetRootURL,
+                            path: path
+                        )
                     }
                 )
             }
@@ -1197,10 +1239,50 @@ private struct RuntimeV2IndexedChild: Identifiable {
     var node: RenderNodeV2
 }
 
+private struct RuntimeV2ImageNodeView: View {
+    var source: String?
+    var assetRootURL: URL
+
+    private var image: NSImage? {
+        guard let resolvedURL = resolvedAssetURL else { return nil }
+        return NSImage(contentsOf: resolvedURL)
+    }
+
+    private var resolvedAssetURL: URL? {
+        guard let resolved = WidgetAssetResolver.assetURL(for: source, under: assetRootURL),
+              FileManager.default.fileExists(atPath: resolved.path) else {
+            return nil
+        }
+
+        return resolved
+    }
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .antialiased(true)
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.white.opacity(0.06))
+                    .overlay {
+                        Image(systemName: "photo")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.32))
+                    }
+            }
+        }
+    }
+}
+
 private struct RuntimeV2InputNodeView: View {
     var node: RenderNodeV2
     var vm: NotchViewModel
     var instanceID: UUID
+    var assetRootURL: URL
     var path: [Int]
 
     @State private var text = ""
@@ -1208,7 +1290,13 @@ private struct RuntimeV2InputNodeView: View {
     var body: some View {
         HStack(spacing: 4) {
             if let leadingAccessory = node.decoded("leadingAccessory", as: RenderNodeV2.self) {
-                RuntimeV2NodeView(node: leadingAccessory, vm: vm, instanceID: instanceID, path: path)
+                RuntimeV2NodeView(
+                    node: leadingAccessory,
+                    vm: vm,
+                    instanceID: instanceID,
+                    assetRootURL: assetRootURL,
+                    path: path
+                )
             }
 
             RuntimeInputTextField(
@@ -1234,7 +1322,13 @@ private struct RuntimeV2InputNodeView: View {
                     .fill(.white.opacity(0.08))
                     .frame(width: 24, height: 24)
                     .overlay {
-                        RuntimeV2NodeView(node: trailingAccessory, vm: vm, instanceID: instanceID, path: path)
+                        RuntimeV2NodeView(
+                            node: trailingAccessory,
+                            vm: vm,
+                            instanceID: instanceID,
+                            assetRootURL: assetRootURL,
+                            path: path
+                        )
                     }
             }
         }

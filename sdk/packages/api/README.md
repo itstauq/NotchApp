@@ -35,6 +35,7 @@ Current exports:
 - `Spacer`
 - `Text`
 - `Icon`
+- `Image`
 - `Button`
 - `Row`
 - `IconButton`
@@ -53,3 +54,5 @@ Current exports:
 The SDK source and examples live in the main repository:
 
 <https://github.com/itstauq/NotchApp>
+
+Local widget images live under your package `assets/` directory and can be referenced with paths like `src="assets/cover.png"`.

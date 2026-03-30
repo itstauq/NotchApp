@@ -315,6 +315,44 @@ function builtinModulePolicyPlugin() {
   };
 }
 
+function syncWidgetAssets(targetPackageDir, outputDir) {
+  const sourceAssetsDir = path.join(targetPackageDir, "assets");
+  const destinationAssetsDir = path.join(outputDir, "assets");
+
+  fs.rmSync(destinationAssetsDir, { recursive: true, force: true });
+
+  if (!fs.existsSync(sourceAssetsDir)) {
+    return;
+  }
+
+  fs.cpSync(sourceAssetsDir, destinationAssetsDir, {
+    recursive: true,
+    dereference: true,
+  });
+}
+
+function replaceBuildOutput(outputDir, stagingOutputDir, backupOutputDir) {
+  fs.rmSync(backupOutputDir, { recursive: true, force: true });
+
+  let movedExistingBuild = false;
+  if (fs.existsSync(outputDir)) {
+    fs.renameSync(outputDir, backupOutputDir);
+    movedExistingBuild = true;
+  }
+
+  try {
+    fs.renameSync(stagingOutputDir, outputDir);
+    if (movedExistingBuild) {
+      fs.rmSync(backupOutputDir, { recursive: true, force: true });
+    }
+  } catch (error) {
+    if (!fs.existsSync(outputDir) && movedExistingBuild && fs.existsSync(backupOutputDir)) {
+      fs.renameSync(backupOutputDir, outputDir);
+    }
+    throw error;
+  }
+}
+
 async function buildWidget(targetPackageDir, options = {}) {
   const { manifest, entryFile } = readManifest(targetPackageDir);
   const { registerCanonicalInstall = false } = options;
@@ -323,10 +361,15 @@ async function buildWidget(targetPackageDir, options = {}) {
   }
 
   const notch = manifest.notch;
-  const outputDir = path.join(targetPackageDir, ".notch", "build");
+  const outputRoot = path.join(targetPackageDir, ".notch");
+  const outputDir = path.join(outputRoot, "build");
   const outfile = path.join(outputDir, "index.cjs");
-  const stagingOutfile = path.join(outputDir, `index.${process.pid}.staging.cjs`);
-  fs.mkdirSync(outputDir, { recursive: true });
+  const stagingOutputDir = path.join(outputRoot, `build.${process.pid}.staging`);
+  const backupOutputDir = path.join(outputRoot, `build.${process.pid}.backup`);
+  const stagingOutfile = path.join(stagingOutputDir, "index.cjs");
+  fs.mkdirSync(outputRoot, { recursive: true });
+  fs.rmSync(stagingOutputDir, { recursive: true, force: true });
+  fs.mkdirSync(stagingOutputDir, { recursive: true });
 
   try {
     await esbuild.build({
@@ -353,11 +396,11 @@ async function buildWidget(targetPackageDir, options = {}) {
     });
 
     failOnDynamicImport(stagingOutfile);
-    fs.renameSync(stagingOutfile, outfile);
+    syncWidgetAssets(targetPackageDir, stagingOutputDir);
+    replaceBuildOutput(outputDir, stagingOutputDir, backupOutputDir);
   } finally {
-    if (fs.existsSync(stagingOutfile)) {
-      fs.rmSync(stagingOutfile, { force: true });
-    }
+    fs.rmSync(stagingOutputDir, { recursive: true, force: true });
+    fs.rmSync(backupOutputDir, { recursive: true, force: true });
   }
 
   console.log(`Built ${notch.id} -> ${outfile}`);
@@ -374,8 +417,7 @@ async function developWidget(targetPackageDir) {
   ensureCanonicalSymlink(targetPackageDir, initial.manifest);
   await notifyApp("start", initial.manifest.notch.id);
   const watchRoots = ["package.json", "src", "assets"]
-    .map((relativePath) => path.join(targetPackageDir, relativePath))
-    .filter((targetPath) => fs.existsSync(targetPath));
+    .map((relativePath) => path.join(targetPackageDir, relativePath));
 
   let buildInFlight = false;
   let buildQueued = false;
