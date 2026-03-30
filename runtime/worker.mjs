@@ -1,13 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createRequire } from "node:module";
+import Module from "node:module";
 import { fileURLToPath } from "node:url";
 import { parentPort, workerData } from "node:worker_threads";
 
 import { clear as clearCallbacks, invoke as invokeCallback } from "./callback-registry.mjs";
 import { createRuntimeFetch } from "./fetch.mjs";
 import { createRenderer } from "./reconciler.mjs";
+import { installRuntimeSecurity } from "./security.mjs";
 import { createStorage } from "./storage.mjs";
+import { loadWidgetBundle } from "./widget-loader.mjs";
 
 if (!parentPort) {
   throw new Error("runtime/worker.mjs must run inside a worker thread.");
@@ -26,9 +28,7 @@ const bundledApiDir = path.join(runtimeDir, "api");
 const devApiDir = path.resolve(runtimeDir, "..", "sdk", "packages", "api");
 const apiDir = fs.existsSync(path.join(bundledApiDir, "index.js")) ? bundledApiDir : devApiDir;
 
-const require = createRequire(import.meta.url);
-const Module = require("node:module");
-const originalResolveFilename = Module._resolveFilename;
+const realProcess = globalThis.process;
 const runtimeModuleMap = new Map([
   ["react-shim", path.join(runtimeDir, "react-shim.cjs")],
   ["react", path.join(runtimeDir, "react-shim.cjs")],
@@ -37,14 +37,13 @@ const runtimeModuleMap = new Map([
   ["@notchapp/api/jsx-runtime", path.join(apiDir, "jsx-runtime.js")],
 ]);
 
-Module._resolveFilename = function resolveRuntimeModule(request, parent, isMain, options) {
-  if (runtimeModuleMap.has(request)) {
-    return runtimeModuleMap.get(request);
-  }
+installRuntimeSecurity({
+  realProcess,
+  runtimeModuleMap,
+  allowedPathSpecifiers: new Set([bundlePath]),
+});
 
-  return originalResolveFilename.call(this, request, parent, isMain, options);
-};
-
+const require = Module.createRequire(import.meta.url);
 const React = require("react");
 const renderer = createRenderer();
 let currentProps = props ?? {};
@@ -128,14 +127,14 @@ function reportError(error) {
   });
 }
 
-process.on("uncaughtException", (error) => {
+realProcess.on("uncaughtException", (error) => {
   reportError(error);
-  process.exit(1);
+  realProcess.exit(1);
 });
 
-process.on("unhandledRejection", (error) => {
+realProcess.on("unhandledRejection", (error) => {
   reportError(error instanceof Error ? error : new Error(String(error)));
-  process.exit(1);
+  realProcess.exit(1);
 });
 
 function callRpc(method, params = {}) {
@@ -195,7 +194,7 @@ function handleMessage(message) {
     if (result && typeof result.then === "function") {
       result.catch((error) => {
         reportError(error instanceof Error ? error : new Error(String(error)));
-        process.exit(1);
+        realProcess.exit(1);
       });
     }
     return;
@@ -212,7 +211,7 @@ function handleMessage(message) {
     }
     pendingRpcRequests.clear();
     clearCallbacks();
-    process.exit(0);
+    realProcess.exit(0);
   }
 }
 
@@ -224,9 +223,14 @@ async function bootstrap() {
     initialValues: storageSnapshot,
     callRpc,
   });
-  globalThis.fetch = createRuntimeFetch({
-    callRpc,
-    createRequestId: createHostApiRequestId,
+  Object.defineProperty(globalThis, "fetch", {
+    value: createRuntimeFetch({
+      callRpc,
+      createRequestId: createHostApiRequestId,
+    }),
+    enumerable: true,
+    configurable: true,
+    writable: false,
   });
 
   globalThis.__NOTCH_RUNTIME__ = {
@@ -235,7 +239,7 @@ async function bootstrap() {
     callRpc,
   };
 
-  const widgetModule = require(bundlePath);
+  const widgetModule = loadWidgetBundle(bundlePath);
   const WidgetComponent = typeof widgetModule?.default === "function"
     ? widgetModule.default
     : typeof widgetModule === "function"

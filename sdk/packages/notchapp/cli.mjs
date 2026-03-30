@@ -1,9 +1,12 @@
 import fs from "node:fs";
+import Module from "node:module";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { spawn } from "node:child_process";
+import { parse } from "acorn";
 import esbuild from "esbuild";
+import { ALLOWED_BUILTIN_SPECIFIERS } from "./security-policy.mjs";
 
 const command = process.argv[2];
 const packageDir = process.cwd();
@@ -14,9 +17,45 @@ const canonicalWidgetsRoot = path.join(
   "NotchApp",
   "Widgets",
 );
+const BUILTIN_ROOTS = new Set(
+  Module.builtinModules
+    .map((specifier) => normalizeBuiltinRoot(specifier))
+    .filter(Boolean)
+);
+const ALLOWED_BUILTIN_SPECIFIER_SET = new Set(ALLOWED_BUILTIN_SPECIFIERS);
 
 function packageRootFromMeta(metaURL) {
   return path.resolve(path.dirname(new URL(metaURL).pathname), "..", "..");
+}
+
+function normalizeBuiltinRoot(request) {
+  if (typeof request !== "string" || request.length === 0) {
+    return null;
+  }
+
+  const withoutPrefix = request.startsWith("node:") ? request.slice(5) : request;
+  return withoutPrefix.split("/")[0] || null;
+}
+
+function normalizeBuiltinRequest(request) {
+  if (typeof request !== "string" || request.length === 0) {
+    return null;
+  }
+
+  const withoutPrefix = request.startsWith("node:") ? request.slice(5) : request;
+  const root = normalizeBuiltinRoot(request);
+  if (!root) {
+    return null;
+  }
+
+  if (request.startsWith("node:") || BUILTIN_ROOTS.has(withoutPrefix) || BUILTIN_ROOTS.has(root)) {
+    return {
+      specifier: withoutPrefix,
+      root,
+    };
+  }
+
+  return null;
 }
 
 function developmentWidgetsRoot() {
@@ -189,6 +228,93 @@ function notifyApp(event, widgetID, info = "") {
   });
 }
 
+function failOnDynamicImport(outfile) {
+  const emitted = fs.readFileSync(outfile, "utf8");
+  const sourceMapIndex = emitted.lastIndexOf("\n//# sourceMappingURL=");
+  const executableSource = sourceMapIndex >= 0 ? emitted.slice(0, sourceMapIndex) : emitted;
+  const program = parse(executableSource, {
+    ecmaVersion: "latest",
+    sourceType: "script",
+  });
+
+  if (containsDynamicImport(program)) {
+    throw new Error(
+      `Dynamic import is unsupported in the widget runtime. ${outfile} still contains import(...).`
+    );
+  }
+}
+
+function containsDynamicImport(node) {
+  if (!node || typeof node !== "object") {
+    return false;
+  }
+
+  if (node.type === "ImportExpression") {
+    return true;
+  }
+
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) {
+      for (const child of value) {
+        if (containsDynamicImport(child)) {
+          return true;
+        }
+      }
+      continue;
+    }
+
+    if (containsDynamicImport(value)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function builtinModulePolicyPlugin() {
+  return {
+    name: "builtin-module-policy",
+    setup(build) {
+      build.onResolve({ filter: /.*/ }, async (args) => {
+        if (args.pluginData?.skipBuiltinPolicy) {
+          return null;
+        }
+
+        const builtin = normalizeBuiltinRequest(args.path);
+        if (!builtin) {
+          return null;
+        }
+
+        if (!args.path.startsWith("node:")) {
+          const resolved = await build.resolve(args.path, {
+            kind: args.kind,
+            importer: args.importer,
+            namespace: args.namespace,
+            resolveDir: args.resolveDir,
+            pluginData: { skipBuiltinPolicy: true },
+          });
+
+          if (!resolved.errors?.length && resolved.path && !resolved.external) {
+            return resolved;
+          }
+        }
+
+        if (!ALLOWED_BUILTIN_SPECIFIER_SET.has(builtin.specifier)) {
+          return {
+            errors: [
+              {
+                text: `Built-in module "${args.path}" is not available in the widget runtime.`,
+              },
+            ],
+          };
+        }
+
+        return { path: args.path, external: true };
+      });
+    },
+  };
+}
+
 async function buildWidget(targetPackageDir, options = {}) {
   const { manifest, entryFile } = readManifest(targetPackageDir);
   const { registerCanonicalInstall = false } = options;
@@ -199,29 +325,40 @@ async function buildWidget(targetPackageDir, options = {}) {
   const notch = manifest.notch;
   const outputDir = path.join(targetPackageDir, ".notch", "build");
   const outfile = path.join(outputDir, "index.cjs");
+  const stagingOutfile = path.join(outputDir, `index.${process.pid}.staging.cjs`);
   fs.mkdirSync(outputDir, { recursive: true });
 
-  await esbuild.build({
-    entryPoints: [entryFile],
-    outfile,
-    bundle: true,
-    platform: "browser",
-    format: "cjs",
-    target: "es2022",
-    jsx: "automatic",
-    jsxImportSource: "@notchapp/api",
-    alias: {
-      react: "react-shim",
-      "react/jsx-runtime": "@notchapp/api/jsx-runtime",
-    },
-    external: [
-      "@notchapp/api",
-      "@notchapp/api/jsx-runtime",
-      "react-shim",
-    ],
-    sourcemap: "inline",
-    logLevel: "silent",
-  });
+  try {
+    await esbuild.build({
+      entryPoints: [entryFile],
+      outfile: stagingOutfile,
+      bundle: true,
+      platform: "browser",
+      format: "cjs",
+      target: "es2022",
+      jsx: "automatic",
+      jsxImportSource: "@notchapp/api",
+      alias: {
+        react: "react-shim",
+        "react/jsx-runtime": "@notchapp/api/jsx-runtime",
+      },
+      plugins: [builtinModulePolicyPlugin()],
+      external: [
+        "@notchapp/api",
+        "@notchapp/api/jsx-runtime",
+        "react-shim",
+      ],
+      sourcemap: "inline",
+      logLevel: "silent",
+    });
+
+    failOnDynamicImport(stagingOutfile);
+    fs.renameSync(stagingOutfile, outfile);
+  } finally {
+    if (fs.existsSync(stagingOutfile)) {
+      fs.rmSync(stagingOutfile, { force: true });
+    }
+  }
 
   console.log(`Built ${notch.id} -> ${outfile}`);
   return manifest;
