@@ -584,6 +584,31 @@ function forwardRequestFullTree(params = {}) {
   }
 }
 
+function forwardUpdateProps(params = {}) {
+  const instanceID = typeof params.instanceId === "string" ? params.instanceId : "";
+  const sessionID = typeof params.sessionId === "string" ? params.sessionId : "";
+  if (!instanceID || !sessionID) {
+    return;
+  }
+
+  const entry = workers.get(instanceID);
+  if (!entry || entry.sessionId !== sessionID || entry.isTerminating) {
+    return;
+  }
+
+  try {
+    entry.worker.postMessage({
+      jsonrpc: "2.0",
+      method: "updateProps",
+      params: {
+        props: params.props ?? {},
+      },
+    });
+  } catch {
+    // The worker may already be gone.
+  }
+}
+
 function shutdownRuntime() {
   beginShutdown(0);
 }
@@ -659,6 +684,9 @@ for await (const line of rl) {
         break;
       case "requestFullTree":
         forwardRequestFullTree(message.params);
+        break;
+      case "updateProps":
+        forwardUpdateProps(message.params);
         break;
       case "shutdown":
         shutdownRuntime();

@@ -51,6 +51,8 @@ let nextRpcRequestId = 0;
 let nextHostApiRequestId = 0;
 const pendingRpcRequests = new Map();
 let storage = createStorage({ callRpc: () => Promise.resolve(null) });
+let widgetModule = null;
+let WidgetComponent = null;
 
 function send(method, params) {
   parentPort.postMessage({
@@ -113,6 +115,16 @@ function buildWidgetProps(widgetModule) {
     state: structuredClone(widgetModule.initialState ?? {}),
     logger: createLogger(),
   };
+}
+
+function renderCurrentWidget() {
+  if (!widgetModule || !WidgetComponent) {
+    throw new Error("Widget worker received props before the bundle finished loading.");
+  }
+
+  renderer.render(
+    React.createElement(WidgetComponent, buildWidgetProps(widgetModule))
+  );
 }
 
 function reportError(error) {
@@ -205,6 +217,17 @@ function handleMessage(message) {
     return;
   }
 
+  if (message.method === "updateProps") {
+    try {
+      currentProps = message.params?.props ?? {};
+      renderCurrentWidget();
+    } catch (error) {
+      reportError(error instanceof Error ? error : new Error(String(error)));
+      realProcess.exit(1);
+    }
+    return;
+  }
+
   if (message.method === "shutdown") {
     for (const pending of pendingRpcRequests.values()) {
       pending.reject(new Error("Widget worker shut down before RPC completed."));
@@ -239,8 +262,8 @@ async function bootstrap() {
     callRpc,
   };
 
-  const widgetModule = loadWidgetBundle(bundlePath);
-  const WidgetComponent = typeof widgetModule?.default === "function"
+  widgetModule = loadWidgetBundle(bundlePath);
+  WidgetComponent = typeof widgetModule?.default === "function"
     ? widgetModule.default
     : typeof widgetModule === "function"
       ? widgetModule
@@ -250,9 +273,7 @@ async function bootstrap() {
     throw new Error(`Widget bundle at ${bundlePath} must export a default component function.`);
   }
 
-  renderer.render(
-    React.createElement(WidgetComponent, buildWidgetProps(widgetModule))
-  );
+  renderCurrentWidget();
 }
 
 await bootstrap();

@@ -228,6 +228,12 @@ private struct RuntimeMountProps: Encodable {
     var environment: RuntimeEnvironmentPayload
 }
 
+private struct RuntimeUpdatePropsParams: Encodable {
+    var instanceId: String
+    var sessionId: String
+    var props: RuntimeMountProps
+}
+
 private struct RuntimeMountResult: Decodable {
     var sessionId: String
 }
@@ -396,7 +402,7 @@ final class WidgetRuntimeController {
         mountedWidgets[instanceID] = mounted
 
         Task {
-            await ensureMountedWorker(instanceID)
+            await syncMountedWorkerProps(instanceID)
         }
     }
 
@@ -497,7 +503,31 @@ final class WidgetRuntimeController {
 
         for instanceID in affectedInstances {
             mountedWidgets[instanceID]?.isDevelopment = isDevelopment
+            await syncMountedWorkerProps(instanceID)
+        }
+    }
+
+    private func syncMountedWorkerProps(_ instanceID: UUID) async {
+        guard let mounted = mountedWidgets[instanceID] else { return }
+
+        guard let sessionID = sessionManager.knownSessionID(for: instanceID) else {
             await ensureMountedWorker(instanceID)
+            return
+        }
+
+        do {
+            try transport.sendNotification(
+                "updateProps",
+                params: RuntimeUpdatePropsParams(
+                    instanceId: instanceID.uuidString,
+                    sessionId: sessionID,
+                    props: RuntimeMountProps(environment: mounted.environment)
+                ),
+                configuration: try processConfiguration()
+            )
+            isAvailable = true
+        } catch {
+            log.write("Widget runtime: updateProps failed for \(instanceID.uuidString): \(error.localizedDescription)")
         }
     }
 
@@ -550,6 +580,10 @@ final class WidgetRuntimeController {
             mountedWidgets[instanceID]?.sessionID = result.sessionId
             errorByInstance.removeValue(forKey: instanceID)
             isAvailable = true
+
+            if mountedWidgets[instanceID]?.environment != mounted.environment {
+                await syncMountedWorkerProps(instanceID)
+            }
         } catch {
             sessionManager.remove(instanceID: instanceID)
             renderTreeByInstance.removeValue(forKey: instanceID)
