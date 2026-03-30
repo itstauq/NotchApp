@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 
 final class WidgetSessionManagerTests: XCTestCase {
     func testApplyPatchInsertsArrayChild() throws {
@@ -156,6 +157,76 @@ final class WidgetSessionManagerTests: XCTestCase {
                 ])
             )
         )
+    }
+
+    func testRenderNodeV2HelpersDecodeBoolAndTypedPayloads() {
+        let node = RenderNodeV2(
+            type: "RoundedRect",
+            key: nil,
+            props: [
+                "checked": .bool(true),
+                "frame": .object([
+                    "width": .number(120),
+                    "maxWidth": .string("infinity"),
+                    "alignment": .string("center")
+                ]),
+                "clipShape": .object([
+                    "type": .string("roundedRect"),
+                    "cornerRadius": .number(14)
+                ])
+            ],
+            children: []
+        )
+
+        XCTAssertEqual(node.bool("checked"), true)
+        XCTAssertEqual(node.decoded("frame", as: RuntimeV2FramePayload.self)?.width, 120)
+        XCTAssertEqual(node.decoded("frame", as: RuntimeV2FramePayload.self)?.maxWidth, .infinity)
+        XCTAssertEqual(node.decoded("clipShape", as: RuntimeV2ClipShapePayload.self)?.cornerRadius, 14)
+    }
+
+    func testRuntimeV2PaddingParserSupportsScalarAxisAndEdgeValues() {
+        let scalar = RuntimeV2StyleResolver.padding(from: .number(8))
+        XCTAssertEqual(scalar, RuntimeV2Padding(top: 8, leading: 8, bottom: 8, trailing: 8))
+
+        let object = RuntimeV2StyleResolver.padding(from: .object([
+            "horizontal": .number(10),
+            "vertical": .number(6),
+            "bottom": .number(12)
+        ]))
+        XCTAssertEqual(object, RuntimeV2Padding(top: 6, leading: 10, bottom: 12, trailing: 10))
+    }
+
+    func testRuntimeV2FrameParserSupportsInfinity() {
+        let frame = RuntimeV2StyleResolver.frame(from: .object([
+            "width": .number(88),
+            "maxWidth": .string("infinity"),
+            "maxHeight": .number(120),
+            "alignment": .string("trailing")
+        ]))
+
+        XCTAssertEqual(frame?.width, 88)
+        XCTAssertEqual(frame?.maxWidth, .infinity)
+        XCTAssertEqual(frame?.maxHeight, .points(120))
+        XCTAssertEqual(frame?.alignment, "trailing")
+    }
+
+    func testRuntimeV2AlignmentAndClipShapeHelpers() {
+        XCTAssertEqual(RuntimeV2StyleResolver.horizontalAlignment("trailing"), .trailing)
+        XCTAssertEqual(RuntimeV2StyleResolver.verticalAlignment("top"), .top)
+        XCTAssertEqual(RuntimeV2StyleResolver.textAlignment("center"), .center)
+        XCTAssertEqual(RuntimeV2StyleResolver.alignment("bottomTrailing"), .bottomTrailing)
+
+        let clipShape = RuntimeV2StyleResolver.clipShape(from: .object([
+            "type": .string("roundedRect"),
+            "cornerRadius": .number(18)
+        ]))
+        XCTAssertEqual(clipShape, RuntimeV2ClipShapePayload(type: "roundedRect", cornerRadius: 18))
+    }
+
+    func testColorHexParserAcceptsRgbAndRgba() {
+        XCTAssertNotNil(Color(hex: "#112233"))
+        XCTAssertNotNil(Color(hex: "#112233CC"))
+        XCTAssertNil(Color(hex: "#XYZXYZ"))
     }
 }
 

@@ -1,10 +1,26 @@
 import Foundation
+import SwiftUI
 
 struct RenderNodeV2: Codable, Equatable {
+    var id: String?
     var type: String
     var key: String?
     var props: [String: RuntimeJSONValue]
     var children: [RenderNodeV2]
+
+    init(
+        id: String? = nil,
+        type: String,
+        key: String?,
+        props: [String: RuntimeJSONValue],
+        children: [RenderNodeV2]
+    ) {
+        self.id = id
+        self.type = type
+        self.key = key
+        self.props = props
+        self.children = children
+    }
 
     func string(_ key: String) -> String? {
         guard case .string(let value)? = props[key] else { return nil }
@@ -14,6 +30,254 @@ struct RenderNodeV2: Codable, Equatable {
     func number(_ key: String) -> Double? {
         guard case .number(let value)? = props[key] else { return nil }
         return value
+    }
+
+    func bool(_ key: String) -> Bool? {
+        guard case .bool(let value)? = props[key] else { return nil }
+        return value
+    }
+
+    func value(_ key: String) -> RuntimeJSONValue? {
+        props[key]
+    }
+
+    func decoded<Value: Decodable>(_ key: String, as type: Value.Type) -> Value? {
+        guard let value = props[key] else { return nil }
+        return try? value.decode(as: type)
+    }
+}
+
+struct RuntimeV2Padding: Equatable {
+    var top: Double
+    var leading: Double
+    var bottom: Double
+    var trailing: Double
+
+    var edgeInsets: EdgeInsets {
+        EdgeInsets(top: top, leading: leading, bottom: bottom, trailing: trailing)
+    }
+}
+
+enum RuntimeV2FrameDimension: Decodable, Equatable {
+    case points(Double)
+    case infinity
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let number = try? container.decode(Double.self) {
+            self = .points(number)
+            return
+        }
+
+        let string = try container.decode(String.self)
+        guard string == "infinity" else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported frame dimension.")
+        }
+        self = .infinity
+    }
+
+    var cgFloatValue: CGFloat {
+        switch self {
+        case .points(let value):
+            return CGFloat(value)
+        case .infinity:
+            return .infinity
+        }
+    }
+}
+
+struct RuntimeV2FramePayload: Decodable, Equatable {
+    var width: Double?
+    var height: Double?
+    var maxWidth: RuntimeV2FrameDimension?
+    var maxHeight: RuntimeV2FrameDimension?
+    var alignment: String?
+}
+
+struct RuntimeV2ClipShapePayload: Decodable, Equatable {
+    var type: String
+    var cornerRadius: Double?
+}
+
+struct RuntimeV2OverlayPayload: Decodable, Equatable {
+    var node: RenderNodeV2
+    var alignment: String?
+}
+
+enum RuntimeV2StyleResolver {
+    static func color(hex: String?) -> Color? {
+        guard let hex else { return nil }
+        return Color(hex: hex)
+    }
+
+    static func padding(from value: RuntimeJSONValue?) -> RuntimeV2Padding? {
+        guard let value else { return nil }
+
+        switch value {
+        case .number(let amount):
+            return RuntimeV2Padding(top: amount, leading: amount, bottom: amount, trailing: amount)
+        case .object(let object):
+            let horizontal = object.number("horizontal") ?? 0
+            let vertical = object.number("vertical") ?? 0
+            return RuntimeV2Padding(
+                top: object.number("top") ?? vertical,
+                leading: object.number("leading") ?? horizontal,
+                bottom: object.number("bottom") ?? vertical,
+                trailing: object.number("trailing") ?? horizontal
+            )
+        default:
+            return nil
+        }
+    }
+
+    static func frame(from value: RuntimeJSONValue?) -> RuntimeV2FramePayload? {
+        guard let value else { return nil }
+        return try? value.decode(as: RuntimeV2FramePayload.self)
+    }
+
+    static func clipShape(from value: RuntimeJSONValue?) -> RuntimeV2ClipShapePayload? {
+        guard let value else { return nil }
+        return try? value.decode(as: RuntimeV2ClipShapePayload.self)
+    }
+
+    static func fontWeight(_ value: String?, default defaultWeight: Font.Weight) -> Font.Weight {
+        switch value {
+        case "ultraLight":
+            return .ultraLight
+        case "thin":
+            return .thin
+        case "light":
+            return .light
+        case "regular":
+            return .regular
+        case "medium":
+            return .medium
+        case "semibold":
+            return .semibold
+        case "bold":
+            return .bold
+        case "heavy":
+            return .heavy
+        case "black":
+            return .black
+        default:
+            return defaultWeight
+        }
+    }
+
+    static func fontDesign(_ value: String?) -> Font.Design {
+        switch value {
+        case "rounded":
+            return .rounded
+        case "monospaced":
+            return .monospaced
+        default:
+            return .default
+        }
+    }
+
+    static func horizontalAlignment(_ value: String?) -> HorizontalAlignment {
+        switch value {
+        case "center":
+            return .center
+        case "trailing":
+            return .trailing
+        default:
+            return .leading
+        }
+    }
+
+    static func verticalAlignment(_ value: String?) -> VerticalAlignment {
+        switch value {
+        case "top":
+            return .top
+        case "bottom":
+            return .bottom
+        default:
+            return .center
+        }
+    }
+
+    static func textAlignment(_ value: String?) -> TextAlignment {
+        switch value {
+        case "center":
+            return .center
+        case "trailing":
+            return .trailing
+        default:
+            return .leading
+        }
+    }
+
+    static func textFrameAlignment(_ value: String?) -> Alignment {
+        switch value {
+        case "center":
+            return .center
+        case "trailing":
+            return .trailing
+        default:
+            return .leading
+        }
+    }
+
+    static func alignment(_ value: String?) -> Alignment {
+        switch value {
+        case "top":
+            return .top
+        case "bottom":
+            return .bottom
+        case "leading":
+            return .leading
+        case "trailing":
+            return .trailing
+        case "topLeading":
+            return .topLeading
+        case "topTrailing":
+            return .topTrailing
+        case "bottomLeading":
+            return .bottomLeading
+        case "bottomTrailing":
+            return .bottomTrailing
+        default:
+            return .center
+        }
+    }
+}
+
+private extension Dictionary where Key == String, Value == RuntimeJSONValue {
+    func number(_ key: String) -> Double? {
+        guard case .number(let value)? = self[key] else { return nil }
+        return value
+    }
+}
+
+extension Color {
+    init?(hex: String) {
+        let trimmed = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = trimmed.hasPrefix("#") ? String(trimmed.dropFirst()) : trimmed
+        guard normalized.count == 6 || normalized.count == 8,
+              let value = UInt64(normalized, radix: 16) else {
+            return nil
+        }
+
+        let red: Double
+        let green: Double
+        let blue: Double
+        let alpha: Double
+
+        if normalized.count == 8 {
+            red = Double((value & 0xFF00_0000) >> 24) / 255
+            green = Double((value & 0x00FF_0000) >> 16) / 255
+            blue = Double((value & 0x0000_FF00) >> 8) / 255
+            alpha = Double(value & 0x0000_00FF) / 255
+        } else {
+            red = Double((value & 0xFF00_00) >> 16) / 255
+            green = Double((value & 0x00FF_00) >> 8) / 255
+            blue = Double(value & 0x0000_FF) / 255
+            alpha = 1
+        }
+
+        self.init(.sRGB, red: red, green: green, blue: blue, opacity: alpha)
     }
 }
 

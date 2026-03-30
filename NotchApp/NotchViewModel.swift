@@ -415,7 +415,19 @@ final class WidgetRuntimeController {
         guard let root = renderTreeByInstance[instanceID],
               let node = node(at: path, in: root),
               let callbackID = node.string(prop),
-              let sessionID = sessionManager.knownSessionID(for: instanceID) else {
+              sessionManager.knownSessionID(for: instanceID) != nil else {
+            return
+        }
+
+        triggerCallback(callbackID: callbackID, for: instanceID, payload: payload)
+    }
+
+    func triggerCallback(
+        callbackID: String,
+        for instanceID: UUID,
+        payload: RuntimeJSONValue = .object([:])
+    ) {
+        guard let sessionID = sessionManager.knownSessionID(for: instanceID) else {
             return
         }
 

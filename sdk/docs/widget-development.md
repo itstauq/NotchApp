@@ -101,75 +101,41 @@ Each widget needs:
 
 - a `default` export that renders the widget
 - a `notch` manifest in `package.json`
-- optional `initialState`
-- optional `actions`
+- any state it needs through normal React hooks or `@notchapp/api` hooks
 
 Example:
 
 ```tsx
-import { Button, Stack, Text } from "@notchapp/api";
+import { Button, Stack, Text, useLocalStorage } from "@notchapp/api";
 
-export const initialState = {
-  count: 0,
-  draft: "",
-};
+export default function Widget({ environment, logger }) {
+  const [count, setCount] = useLocalStorage("count", 0);
 
-export const actions = {
-  increment(state) {
-    return {
-      ...state,
-      count: (state?.count ?? 0) + 1,
-    };
-  },
-  setDraft(state, { payload }) {
-    return {
-      ...state,
-      draft: payload?.value ?? "",
-    };
-  },
-};
-
-export default function Widget({ environment, state, logger }) {
-  logger.info(`render span=${environment.span} count=${state.count}`);
+  logger.info(`render span=${environment.span} count=${count}`);
 
   return (
     <Stack spacing={10}>
       <Text>Hello from NotchApp</Text>
-      <Text tone="secondary">{`Span ${environment.span} • Count ${state.count}`}</Text>
-      <Button title="Increment" action="increment" />
+      <Text tone="secondary">{`Span ${environment.span} • Count ${count}`}</Text>
+      <Button title="Increment" onPress={() => setCount((value) => value + 1)} />
     </Stack>
   );
 }
 ```
 
-`initialState` is the per-widget-instance state that NotchApp keeps while the widget is mounted. That state comes back into your render function as `state`.
+Use normal React state for transient UI state. Use `useLocalStorage` when the state should persist across widget reloads.
 
 The render function receives:
 
 - `environment`
-- `state`
 - `logger`
 
 `environment.span` is the most useful field in practice. Use it to make your widget width-responsive and adapt to narrow or wide layouts.
 
-Actions receive the current state plus:
+Widget callbacks receive payload objects when the component provides one:
 
-- `environment`
-- `logger`
-- `payload`
-
-Current payload shape:
-
-```ts
-type RuntimeActionPayload = {
-  value?: string;
-  id?: string;
-};
-```
-
-`Input` sends `{ value }` on change and submit. `Button`, `Row`, `IconButton`, and `Checkbox` can send a custom `payload`.
-
-If an action returns `undefined`, the current state is preserved.
+- `Button`, `Row`, `Checkbox`, and `IconButton` use `onPress`
+- `Input` uses `onChange` and `onSubmit`, and those callbacks receive `{ value }`
 
 ## Manifest
 
@@ -203,12 +169,17 @@ Current validation rules:
 
 - `Stack`
 - `Inline`
-- `Row`
+- `Spacer`
 - `Text`
 - `Icon`
+- `Button`
+- `Row`
 - `IconButton`
 - `Checkbox`
 - `Input`
-- `Button`
+- `ScrollView`
+- `Divider`
+- `Circle`
+- `RoundedRect`
 
 The fastest reference is the starter widget in [sdk/examples/hello](/Users/tauquir/Projects/NotchApp2/sdk/examples/hello).
