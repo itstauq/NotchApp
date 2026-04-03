@@ -821,7 +821,9 @@ final class ViewManager {
 
         sanitizeAllLayouts()
 
-        if views.contains(where: { $0.id == snapshot.selectedViewID }) {
+        if !Preferences.rememberLastView {
+            selectedViewID = views.first?.id ?? SavedView.defaultViews[0].id
+        } else if views.contains(where: { $0.id == snapshot.selectedViewID }) {
             selectedViewID = snapshot.selectedViewID
         } else {
             selectedViewID = views.first?.id ?? SavedView.defaultViews[0].id
@@ -831,7 +833,9 @@ final class ViewManager {
     private func persistState() {
         let snapshot = PersistedViewStateSnapshot(
             views: views,
-            selectedViewID: selectedViewID,
+            selectedViewID: Preferences.rememberLastView
+                ? selectedViewID
+                : (views.first?.id ?? SavedView.defaultViews[0].id),
             layoutsByViewID: layoutsByViewID
         )
 

@@ -4,6 +4,7 @@ import SwiftUI
 struct ViewSwitcher: View {
     var viewManager: ViewManager
     var vm: NotchViewModel
+    var accentTint: Color
 
     @State private var heldViewID: UUID?
     @State private var gestureBaselineTranslation: CGFloat = 0
@@ -141,13 +142,13 @@ struct ViewSwitcher: View {
         .frame(height: tabHeight)
         .background(
             Capsule()
-                .fill(isHeld ? .white.opacity(0.18) : (isSelected ? .white.opacity(0.12) : .clear))
+                .fill(isHeld ? .white.opacity(0.18) : (isSelected ? accentTint.opacity(0.18) : .clear))
         )
         .overlay(
             Capsule()
-                .strokeBorder(.white.opacity(isHeld ? 0.16 : (isSelected ? 0.1 : 0.04)), lineWidth: 1)
+                .strokeBorder(isHeld ? .white.opacity(0.16) : (isSelected ? accentTint.opacity(0.34) : .white.opacity(0.04)), lineWidth: 1)
         )
-        .foregroundStyle(isSelected || isHeld ? .white : .white.opacity(0.68))
+        .foregroundStyle(isSelected ? accentTint.opacity(0.96) : (isHeld ? .white : .white.opacity(0.68)))
         .contentShape(Capsule())
     }
 

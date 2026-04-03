@@ -3,6 +3,7 @@ import SwiftUI
 
 struct NotchContentView: View {
     var vm: NotchViewModel
+    @State private var accentColor = Preferences.accentColor
 
     private var currentWidth: CGFloat {
         vm.isExpanded ? vm.expandedWidth : vm.notchWidth - 2
@@ -48,6 +49,9 @@ struct NotchContentView: View {
         .task(id: vm.viewManager.layoutSnapshot()) {
             vm.syncWidgetRuntimeLayouts()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .accentColorPreferenceDidChange)) { _ in
+            accentColor = Preferences.accentColor
+        }
     }
 
     private var expandedContent: some View {
@@ -57,7 +61,7 @@ struct NotchContentView: View {
                     Color.clear
 
                     ZStack(alignment: .leading) {
-                        ViewSwitcher(viewManager: vm.viewManager, vm: vm)
+                        ViewSwitcher(viewManager: vm.viewManager, vm: vm, accentTint: accentColor.color)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                     }
                     .frame(width: max(0, headerLaneWidth - 24), height: max(0, headerRowHeight - 8), alignment: .leading)
@@ -89,7 +93,7 @@ struct NotchContentView: View {
                         HeaderAccessoryButton(
                             activeSymbol: vm.isEditingLayout ? "checkmark" : "pencil",
                             inactiveLabel: "Edit",
-                            tint: Color(red: 0.39, green: 0.68, blue: 0.98),
+                            tint: accentColor.color,
                             isActive: vm.isEditingLayout
                         ) {
                             if vm.isEditingLayout {
@@ -102,14 +106,17 @@ struct NotchContentView: View {
                         HeaderAccessoryButton(
                             activeSymbol: "pin.fill",
                             inactiveSymbol: "pin",
-                            tint: Color(red: 0.98, green: 0.39, blue: 0.43),
+                            tint: accentColor.color,
                             isActive: vm.isViewPinned,
                             inactiveRotation: .degrees(45)
                         ) {
                             vm.togglePinnedView()
                         }
 
-                        HeaderAccessoryButton(activeSymbol: "gearshape.fill") {}
+                        HeaderAccessoryButton(activeSymbol: "gearshape.fill") {
+                            vm.collapse()
+                            AppSettingsWindow.open()
+                        }
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 4)
@@ -119,7 +126,7 @@ struct NotchContentView: View {
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
 
-            WidgetLayoutRow(vm: vm)
+            WidgetLayoutRow(vm: vm, accentTint: accentColor.color)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.top, headerRowHeight + 12)
                 .padding(.horizontal, 18)
@@ -139,6 +146,7 @@ struct NotchContentView: View {
 
 private struct WidgetLayoutRow: View {
     var vm: NotchViewModel
+    var accentTint: Color
 
     @State private var heldWidgetID: UUID?
     @State private var heldWidgetTranslation: CGFloat = 0
@@ -191,6 +199,7 @@ private struct WidgetLayoutRow: View {
                         WidgetCard(
                             widget: widget,
                             vm: vm,
+                            accentTint: accentTint,
                             isEditing: vm.isEditingLayout,
                             isHeld: isHeld,
                             minSpan: definition?.minSpan ?? 3,
@@ -388,6 +397,7 @@ private struct EmptyWidgetState: View {
 private struct WidgetCard: View {
     var widget: WidgetInstance
     var vm: NotchViewModel
+    var accentTint: Color
     var isEditing: Bool
     var isHeld: Bool
     var minSpan: Int
@@ -457,7 +467,7 @@ private struct WidgetCard: View {
         .overlay {
             if isEditing {
                 cardShape
-                    .fill(.black.opacity(0.08))
+                    .fill(accentTint.opacity(0.18))
                     .contentShape(cardShape)
                     .gesture(
                         DragGesture(minimumDistance: 0)
@@ -474,7 +484,14 @@ private struct WidgetCard: View {
             if isEditing {
                 Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.white.opacity(0.96))
+                    .padding(10)
+                    .background(.black.opacity(0.42), in: Circle())
+                    .overlay(
+                        Circle()
+                            .strokeBorder(.white.opacity(0.22), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(0.28), radius: 8, y: 4)
                     .allowsHitTesting(false)
             }
         }
@@ -496,6 +513,12 @@ private struct WidgetCard: View {
                     )
 
                 }
+                .padding(6)
+                .background(.black.opacity(0.42), in: Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(.white.opacity(0.22), lineWidth: 1)
+                )
                 .padding(10)
             }
         }
@@ -506,6 +529,12 @@ private struct WidgetCard: View {
                     tint: Color(red: 0.98, green: 0.39, blue: 0.43),
                     isEnabled: true,
                     action: onRemove
+                )
+                .padding(6)
+                .background(.black.opacity(0.42), in: Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(.white.opacity(0.22), lineWidth: 1)
                 )
                 .padding(10)
             }
@@ -553,12 +582,12 @@ private struct WidgetCard: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(tint.opacity(isEnabled ? 1 : 0.35))
+                .foregroundStyle(tint.opacity(isEnabled ? 0.96 : 0.58))
                 .frame(width: 26, height: 26)
-                .background(.black.opacity(isEnabled ? 0.28 : 0.18), in: Circle())
+                .background(.black.opacity(isEnabled ? 0.42 : 0.34), in: Circle())
                 .overlay(
                     Circle()
-                        .strokeBorder(tint.opacity(isEnabled ? 0.35 : 0.12), lineWidth: 1)
+                        .strokeBorder(.white.opacity(isEnabled ? 0.22 : 0.16), lineWidth: 1)
                 )
         }
         .buttonStyle(.plain)
@@ -2068,6 +2097,8 @@ struct EditModeConfirmationDialog: View {
     @State private var escMonitor: Any?
 
     var body: some View {
+        let saveTint = Preferences.accentColor.color
+
         ZStack {
             Color.black.opacity(0.82)
                 .ignoresSafeArea()
@@ -2112,11 +2143,11 @@ struct EditModeConfirmationDialog: View {
                             .frame(height: 30)
                             .background(
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(Color(red: 0.39, green: 0.68, blue: 0.98).opacity(0.2))
+                                    .fill(saveTint.opacity(0.2))
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .strokeBorder(Color(red: 0.39, green: 0.68, blue: 0.98).opacity(0.34), lineWidth: 1)
+                                    .strokeBorder(saveTint.opacity(0.34), lineWidth: 1)
                             )
                     }
                     .buttonStyle(.plain)

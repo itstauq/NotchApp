@@ -6,30 +6,45 @@ struct NotchAppApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        Settings { EmptyView() }
+        Settings {
+            AppSettingsView()
+        }
     }
 }
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private static let toggleHotKeyID: UInt32 = 1
+
     private var statusItem: NSStatusItem?
     private let logger = FileLog()
     private let keepsCollapsedNotchVisibleForDemo = false
     private var moveMonitor: Any?
+    private var localMoveMonitor: Any?
     private var clickMonitor: Any?
     private var localClickMonitor: Any?
+    private var hoverOpenTask: Task<Void, Never>?
     private var notchRect: CGRect = .zero
     private var expandedRect: CGRect = .zero
     private var notchPanel: NotchPanel?
     private var blurPanel: NotchPanel?
     private let vm = NotchViewModel()
+    private var menuBarIconPreferenceObserver: NSObjectProtocol?
+    private var keyboardShortcutsPreferenceObserver: NSObjectProtocol?
+    private var keyboardShortcutPreferenceObserver: NSObjectProtocol?
+    private var hotKeyRef: EventHotKeyRef?
+    private var hotKeyHandlerRef: EventHandlerRef?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         logger.write("App launched")
         registerWithLaunchServices()
         registerURLHandler()
-        setupStatusBar()
+        updateStatusBarVisibility()
+        observeMenuBarIconPreference()
+        observeKeyboardShortcutsPreference()
+        observeKeyboardShortcutPreference()
         setupNotch()
+        registerHotKeyIfNeeded()
         startMouseMonitor()
     }
 
@@ -41,12 +56,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         vm.flushStorageWrites()
         vm.widgetRuntime.shutdown()
         if let monitor = moveMonitor { NSEvent.removeMonitor(monitor) }
+        if let monitor = localMoveMonitor { NSEvent.removeMonitor(monitor) }
         if let monitor = clickMonitor { NSEvent.removeMonitor(monitor) }
         if let monitor = localClickMonitor { NSEvent.removeMonitor(monitor) }
+        hoverOpenTask?.cancel()
         NSAppleEventManager.shared().removeEventHandler(
             forEventClass: AEEventClass(kInternetEventClass),
             andEventID: AEEventID(kAEGetURL)
         )
+        if let menuBarIconPreferenceObserver {
+            NotificationCenter.default.removeObserver(menuBarIconPreferenceObserver)
+        }
+        if let keyboardShortcutsPreferenceObserver {
+            NotificationCenter.default.removeObserver(keyboardShortcutsPreferenceObserver)
+        }
+        if let keyboardShortcutPreferenceObserver {
+            NotificationCenter.default.removeObserver(keyboardShortcutPreferenceObserver)
+        }
+        unregisterHotKey()
         logger.write("App exiting")
     }
 
@@ -127,35 +154,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startMouseMonitor() {
         // Mouse move — hover for peek, hover-exit for collapse
         moveMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
-            guard let self else { return }
-            let mouse = NSEvent.mouseLocation
+            self?.handleMouseMove()
+        }
 
-            // When expanded, track the expanded rect for exit
-            // When not expanded, track the notch rect for entry
-            let checkRect = vm.isExpanded ? expandedRect : notchRect
-            let inside = contains(checkRect, mouse)
-
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                if inside != vm.isMouseInside {
-                    if inside {
-                        notchPanel?.alphaValue = 1
-                        blurPanel?.alphaValue = 1
-                        vm.mouseEntered()
-                    } else {
-                        vm.mouseExited()
-                        // Hide panel after collapse animation
-                        Task { @MainActor [weak self] in
-                            try? await Task.sleep(for: .milliseconds(500))
-                            guard let self, !self.vm.isMouseInside, !self.vm.isExpanded else { return }
-                            if !self.keepsCollapsedNotchVisibleForDemo {
-                                self.notchPanel?.alphaValue = 0
-                                self.blurPanel?.alphaValue = 0
-                            }
-                        }
-                    }
-                }
-            }
+        localMoveMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
+            self?.handleMouseMove()
+            return event
         }
 
         // Click inside notch → expand (global: clicks in other windows)
@@ -180,6 +184,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func handleMouseMove() {
+        let mouse = NSEvent.mouseLocation
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+
+            // When expanded, track the expanded rect for exit
+            // When not expanded, track the notch rect for entry
+            let checkRect = vm.isExpanded ? expandedRect : notchRect
+            let inside = contains(checkRect, mouse)
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if inside != vm.isMouseInside {
+                    if inside {
+                        hoverOpenTask?.cancel()
+                        notchPanel?.alphaValue = 1
+                        blurPanel?.alphaValue = 1
+                        vm.mouseEntered()
+                        if Preferences.openNotchMode == .hover {
+                            hoverOpenTask = Task { @MainActor [weak self] in
+                                guard let self else { return }
+                                try? await Task.sleep(for: .milliseconds(Int(Preferences.hoverDelay * 1000)))
+                                guard !Task.isCancelled, self.vm.isMouseInside, !self.vm.isExpanded else { return }
+                                self.vm.clicked()
+                            }
+                        }
+                    } else {
+                        hoverOpenTask?.cancel()
+                        vm.mouseExited()
+                        // Hide panel after collapse animation
+                        Task { @MainActor [weak self] in
+                            try? await Task.sleep(for: .milliseconds(500))
+                            guard let self, !self.vm.isMouseInside, !self.vm.isExpanded else { return }
+                            if !self.keepsCollapsedNotchVisibleForDemo {
+                                self.notchPanel?.alphaValue = 0
+                                self.blurPanel?.alphaValue = 0
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private func handleClick(at mouse: CGPoint) {
         if vm.isRenamingView {
             if contains(vm.renameViewFieldScreenRect, mouse) {
@@ -196,10 +245,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if !vm.isExpanded && contains(notchRect, mouse) {
+            hoverOpenTask?.cancel()
             notchPanel?.alphaValue = 1
             blurPanel?.alphaValue = 1
             vm.clicked()
         } else if vm.isExpanded && !contains(expandedRect, mouse) {
+            hoverOpenTask?.cancel()
             vm.mouseExited()
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .milliseconds(500))
@@ -213,6 +264,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupStatusBar() {
+        guard statusItem == nil else { return }
+
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem?.button {
             button.image = NSImage(systemSymbolName: "rectangle.topthird.inset.filled", accessibilityDescription: "NotchApp")
@@ -220,6 +273,138 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
         statusItem?.menu = menu
+    }
+
+    private func removeStatusBar() {
+        guard let statusItem else { return }
+        NSStatusBar.system.removeStatusItem(statusItem)
+        self.statusItem = nil
+    }
+
+    private func updateStatusBarVisibility() {
+        if Preferences.isMenuBarIconEnabled {
+            setupStatusBar()
+        } else {
+            removeStatusBar()
+        }
+    }
+
+    private func observeMenuBarIconPreference() {
+        menuBarIconPreferenceObserver = NotificationCenter.default.addObserver(
+            forName: .menuBarIconPreferenceDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.updateStatusBarVisibility()
+            }
+        }
+    }
+
+    private func observeKeyboardShortcutsPreference() {
+        keyboardShortcutsPreferenceObserver = NotificationCenter.default.addObserver(
+            forName: .keyboardShortcutsPreferenceDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.registerHotKeyIfNeeded()
+            }
+        }
+    }
+
+    private func observeKeyboardShortcutPreference() {
+        keyboardShortcutPreferenceObserver = NotificationCenter.default.addObserver(
+            forName: .keyboardShortcutPreferenceDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.registerHotKeyIfNeeded()
+            }
+        }
+    }
+
+    private func registerHotKeyIfNeeded() {
+        unregisterHotKey()
+        guard Preferences.keyboardShortcutsEnabled else { return }
+
+        if hotKeyHandlerRef == nil {
+            var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+            let callback: EventHandlerUPP = { _, event, userData in
+                guard let userData, let event else { return noErr }
+                let appDelegate = Unmanaged<AppDelegate>.fromOpaque(userData).takeUnretainedValue()
+                return appDelegate.handleHotKeyEvent(event)
+            }
+
+            InstallEventHandler(
+                GetApplicationEventTarget(),
+                callback,
+                1,
+                &eventType,
+                Unmanaged.passUnretained(self).toOpaque(),
+                &hotKeyHandlerRef
+            )
+        }
+
+        var hotKeyID = EventHotKeyID(signature: fourCharCode("NAPP"), id: Self.toggleHotKeyID)
+        guard let shortcut = Preferences.toggleNotchShortcut else { return }
+        RegisterEventHotKey(
+            shortcut.keyCode,
+            shortcut.carbonModifiers,
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &hotKeyRef
+        )
+    }
+
+    private func unregisterHotKey() {
+        if let hotKeyRef {
+            UnregisterEventHotKey(hotKeyRef)
+            self.hotKeyRef = nil
+        }
+    }
+
+    private func handleHotKeyEvent(_ event: EventRef) -> OSStatus {
+        var hotKeyID = EventHotKeyID()
+        let status = GetEventParameter(
+            event,
+            EventParamName(kEventParamDirectObject),
+            EventParamType(typeEventHotKeyID),
+            nil,
+            MemoryLayout<EventHotKeyID>.size,
+            nil,
+            &hotKeyID
+        )
+
+        guard status == noErr, hotKeyID.id == Self.toggleHotKeyID else {
+            return noErr
+        }
+
+        toggleNotchFromShortcut()
+        return noErr
+    }
+
+    private func toggleNotchFromShortcut() {
+        hoverOpenTask?.cancel()
+
+        if vm.isExpanded {
+            vm.mouseExited()
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(500))
+                guard let self, !self.vm.isExpanded else { return }
+                if !self.keepsCollapsedNotchVisibleForDemo {
+                    self.notchPanel?.alphaValue = 0
+                    self.blurPanel?.alphaValue = 0
+                }
+            }
+            return
+        }
+
+        notchPanel?.alphaValue = 1
+        blurPanel?.alphaValue = 1
+        vm.clicked()
     }
 
     @objc private func quit() {
@@ -268,6 +453,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         logger.write("CLI event: \(event) for \(widgetID)")
         vm.handleDevelopmentEvent(widgetID: widgetID, event: event, info: info)
     }
+}
+
+private func fourCharCode(_ string: String) -> OSType {
+    string.utf8.reduce(0) { ($0 << 8) | OSType($1) }
 }
 
 struct FileLog {

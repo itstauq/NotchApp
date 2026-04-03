@@ -37,6 +37,7 @@
 		A10000320000000000000032 /* WidgetAssetResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000220000000000000022; };
 		A10000330000000000000033 /* WidgetImagePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000230000000000000023; };
 		A10000340000000000000034 /* WidgetImagePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000230000000000000023; };
+		A10000370000000000000037 /* AppSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000240000000000000024; };
 		A10000240000000000000024 /* SQLCipher in Frameworks */ = {isa = PBXBuildFile; productRef = C10000020000000000000002 /* SQLCipher */; };
 		A10000250000000000000025 /* SQLCipher in Frameworks */ = {isa = PBXBuildFile; productRef = C10000030000000000000003 /* SQLCipher */; };
 		A10000350000000000000035 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = C10000050000000000000005 /* Nuke */; };
@@ -62,6 +63,7 @@
 		A20000210000000000000021 /* WidgetHostAPITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetHostAPITests.swift; sourceTree = "<group>"; };
 		A20000220000000000000022 /* WidgetAssetResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetAssetResolver.swift; sourceTree = "<group>"; };
 		A20000230000000000000023 /* WidgetImagePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetImagePipeline.swift; sourceTree = "<group>"; };
+		A20000240000000000000024 /* AppSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsView.swift; sourceTree = "<group>"; };
 		A20000090000000000000009 /* SavedViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedViews.swift; sourceTree = "<group>"; };
 		A20000100000000000000010 /* ViewSwitcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewSwitcher.swift; sourceTree = "<group>"; };
 		A20000060000000000000006 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -119,6 +121,7 @@
 					A20000200000000000000020 /* WidgetHostAPI.swift */,
 					A20000220000000000000022 /* WidgetAssetResolver.swift */,
 					A20000230000000000000023 /* WidgetImagePipeline.swift */,
+					A20000240000000000000024 /* AppSettingsView.swift */,
 					A20000090000000000000009 /* SavedViews.swift */,
 					A20000100000000000000010 /* ViewSwitcher.swift */,
 					A20000060000000000000006 /* Assets.xcassets */,
@@ -283,6 +286,7 @@
 					A10000280000000000000028 /* WidgetHostAPI.swift in Sources */,
 					A10000310000000000000031 /* WidgetAssetResolver.swift in Sources */,
 					A10000330000000000000033 /* WidgetImagePipeline.swift in Sources */,
+					A10000370000000000000037 /* AppSettingsView.swift in Sources */,
 					A10000080000000000000008 /* SavedViews.swift in Sources */,
 					A10000090000000000000009 /* ViewSwitcher.swift in Sources */,
 				);

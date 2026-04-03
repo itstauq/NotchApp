@@ -932,6 +932,7 @@ final class NotchViewModel {
     func mouseEntered() {
         log.write("VM: mouseEntered")
         collapseTask?.cancel()
+        restoreDefaultViewIfNeeded()
         isMouseInside = true
 
         withAnimation(Self.elevateAnim) {
@@ -967,6 +968,7 @@ final class NotchViewModel {
     func clicked() {
         log.write("VM: clicked, expanding")
         collapseTask?.cancel()
+        restoreDefaultViewIfNeeded()
         refreshWidgetDefinitions()
         withAnimation(Self.peekAnim) {
             isExpanded = true
@@ -984,6 +986,13 @@ final class NotchViewModel {
             isElevated = false
         }
         isViewMenuOpen = false
+    }
+
+    private func restoreDefaultViewIfNeeded() {
+        guard !Preferences.rememberLastView,
+              let firstView = viewManager.views.first,
+              viewManager.selectedViewID != firstView.id else { return }
+        viewManager.selectedViewID = firstView.id
     }
 
     func togglePinnedView() {
