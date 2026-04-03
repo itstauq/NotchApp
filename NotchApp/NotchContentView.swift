@@ -738,6 +738,7 @@ private struct RuntimeV2NodeView: View {
             return AnyView(
                 RuntimeV2ImageNodeView(
                     node: node,
+                    instanceID: instanceID,
                     assetRootURL: assetRootURL
                 )
             )
@@ -1252,6 +1253,7 @@ private final class RuntimeV2ImageLoader: ObservableObject {
     @Published private(set) var image: NSImage?
 
     func load(
+        instanceID: UUID,
         sourceURL: URL?,
         targetSize: CGSize?,
         contentMode: String?,
@@ -1266,6 +1268,7 @@ private final class RuntimeV2ImageLoader: ObservableObject {
         }
 
         if let cached = WidgetImagePipeline.cachedImage(
+            for: instanceID,
             at: sourceURL,
             targetSize: targetSize,
             scale: scale,
@@ -1278,6 +1281,7 @@ private final class RuntimeV2ImageLoader: ObservableObject {
         image = nil
 
         let nextImage = await WidgetImagePipeline.image(
+            for: instanceID,
             at: sourceURL,
             targetSize: targetSize,
             scale: scale,
@@ -1291,6 +1295,7 @@ private final class RuntimeV2ImageLoader: ObservableObject {
 
 private struct RuntimeV2ImageNodeView: View {
     var node: RenderNodeV2
+    var instanceID: UUID
     var assetRootURL: URL
 
     @Environment(\.displayScale) private var displayScale
@@ -1308,6 +1313,22 @@ private struct RuntimeV2ImageNodeView: View {
         }
 
         return resolved
+    }
+
+    private var resolvedRemoteURL: URL? {
+        guard let source = node.string("src")?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !source.isEmpty,
+              let url = URL(string: source),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return nil
+        }
+
+        return url
+    }
+
+    private var resolvedSourceURL: URL? {
+        resolvedRemoteURL ?? resolvedAssetURL
     }
 
     private var explicitFrameSize: CGSize? {
@@ -1377,7 +1398,8 @@ private struct RuntimeV2ImageNodeView: View {
         let width = Int((targetSize?.width ?? 0).rounded(.up))
         let height = Int((targetSize?.height ?? 0).rounded(.up))
         let scale = Int((screenScale * 100).rounded())
-        return "\(resolvedAssetURL?.path ?? "missing")#\(width)x\(height)#\(scale)#\(node.string("contentMode") ?? "fill")"
+        let sourceIdentifier = resolvedSourceURL?.absoluteString ?? "missing"
+        return "\(instanceID.uuidString)#\(sourceIdentifier)#\(width)x\(height)#\(scale)#\(node.string("contentMode") ?? "fill")"
     }
 
     var body: some View {
@@ -1421,7 +1443,8 @@ private struct RuntimeV2ImageNodeView: View {
         }
         .task(id: loadKey) {
             await loader.load(
-                sourceURL: resolvedAssetURL,
+                instanceID: instanceID,
+                sourceURL: resolvedSourceURL,
                 targetSize: targetSize,
                 contentMode: node.string("contentMode"),
                 scale: screenScale

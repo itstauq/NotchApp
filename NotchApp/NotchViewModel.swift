@@ -363,6 +363,7 @@ final class WidgetRuntimeController {
         sessionManager.remove(instanceID: instanceID)
         renderTreeByInstance.removeValue(forKey: instanceID)
         errorByInstance.removeValue(forKey: instanceID)
+        WidgetImagePipeline.clearCache(for: instanceID)
 
         guard let mounted, let sessionID else { return }
 
@@ -610,6 +611,7 @@ final class WidgetRuntimeController {
         let sessionID = sessionManager.knownSessionID(for: instanceID)
         sessionManager.remove(instanceID: instanceID)
         mountedWidgets[instanceID]?.sessionID = nil
+        WidgetImagePipeline.clearCache(for: instanceID)
 
         if let sessionID {
             do {
@@ -724,6 +726,7 @@ final class WidgetRuntimeController {
     private func handleProcessTermination(description: String) {
         log.write(description)
         isAvailable = false
+        WidgetImagePipeline.clearCaches(for: Array(mountedWidgets.keys))
         sessionManager.reset()
         renderTreeByInstance.removeAll()
         for instanceID in mountedWidgets.keys {
@@ -859,7 +862,7 @@ final class WidgetRuntimeController {
             return
         }
 
-        WidgetImagePipeline.clearCache()
+        WidgetImagePipeline.clearCaches(for: affectedInstances)
 
         for instanceID in affectedInstances {
             await restartInstance(instanceID)

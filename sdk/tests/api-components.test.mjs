@@ -105,6 +105,10 @@ test("component wrappers emit host elements with the expected props", () => {
     opacity: 0.8,
     contentMode: "fit",
   });
+  const remoteImage = api.Image({
+    src: "https://example.com/cover.png",
+    contentMode: "fit",
+  });
   const inputChildren = Array.isArray(input.props.children) ? input.props.children : [input.props.children];
   const roundedRectChildren = Array.isArray(roundedRect.props.children)
     ? roundedRect.props.children
@@ -120,6 +124,8 @@ test("component wrappers emit host elements with the expected props", () => {
   assert.equal(image.props.src, "assets/cover.png");
   assert.equal(image.props.opacity, 0.8);
   assert.equal(image.props.contentMode, "fit");
+  assert.equal(remoteImage.props.src, "https://example.com/cover.png");
+  assert.equal(remoteImage.props.contentMode, "fit");
   assert.equal(Array.isArray(row.props.children), true);
   assert.equal(inputChildren[0].type, "__notch_trailingAccessory");
   assert.equal(inputChildren[0].props.children.type, "Icon");

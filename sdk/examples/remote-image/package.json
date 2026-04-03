@@ -1,0 +1,25 @@
+{
+  "name": "@notchapp/example-remote-image",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "notchapp develop",
+    "build": "notchapp build",
+    "lint": "notchapp lint"
+  },
+  "devDependencies": {
+    "notchapp": "^0.1.0"
+  },
+  "dependencies": {
+    "@notchapp/api": "^0.1.0"
+  },
+  "notch": {
+    "id": "com.notchapp.remote-image",
+    "title": "Remote Image",
+    "description": "Remote image example",
+    "icon": "network",
+    "minSpan": 3,
+    "maxSpan": 12,
+    "entry": "src/index.tsx"
+  }
+}

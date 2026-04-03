@@ -20,9 +20,38 @@ final class WidgetHostAPITests: XCTestCase {
                     headers: nil,
                     body: nil,
                     bodyEncoding: nil
-                )
+                ),
+                context: networkContext(kind: .fetch)
             )
             XCTFail("Expected file:// fetch to be rejected")
+        } catch let error as RuntimeTransportRPCError {
+            XCTAssertEqual(error.code, -32010)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testNetworkServiceRejectsHTTPFetchURLs() async {
+        let service = WidgetHostNetworkService(
+            makeDataTask: { _, _ in
+                XCTFail("Fetch factory should not be called for rejected schemes")
+                return TestNetworkDataTask()
+            }
+        )
+
+        do {
+            _ = try await service.fetch(
+                RuntimeFetchRequestParams(
+                    requestId: "req-http",
+                    url: "http://example.com/data",
+                    method: "GET",
+                    headers: nil,
+                    body: nil,
+                    bodyEncoding: nil
+                ),
+                context: networkContext(kind: .fetch)
+            )
+            XCTFail("Expected http fetch to be rejected")
         } catch let error as RuntimeTransportRPCError {
             XCTAssertEqual(error.code, -32010)
         } catch {
@@ -50,7 +79,8 @@ final class WidgetHostAPITests: XCTestCase {
                     headers: ["content-type": "application/json"],
                     body: "{\"hello\":true}",
                     bodyEncoding: "text"
-                )
+                ),
+                context: networkContext(kind: .fetch)
             )
         }
 
@@ -74,6 +104,113 @@ final class WidgetHostAPITests: XCTestCase {
         XCTAssertEqual(payload.headers["Content-Type"], "application/json")
     }
 
+    func testNetworkServiceRejectsRedirectedHTTPFinalURL() async {
+        let task = TestNetworkDataTask()
+        let service = WidgetHostNetworkService(
+            makeDataTask: { _, completion in
+                task.completion = completion
+                return task
+            }
+        )
+
+        let fetchTask = Task {
+            try await service.fetch(
+                RuntimeFetchRequestParams(
+                    requestId: "req-redirect-final-http",
+                    url: "https://example.com/data",
+                    method: "GET",
+                    headers: nil,
+                    body: nil,
+                    bodyEncoding: nil
+                ),
+                context: networkContext(kind: .fetch)
+            )
+        }
+
+        await Task.yield()
+
+        let redirectedResponse = HTTPURLResponse(
+            url: URL(string: "http://example.com/data")!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "text/plain"]
+        )!
+        task.complete(data: Data("insecure".utf8), response: redirectedResponse, error: nil)
+
+        do {
+            _ = try await fetchTask.value
+            XCTFail("Expected redirected insecure final URL to be rejected")
+        } catch let error as RuntimeTransportRPCError {
+            XCTAssertEqual(error.code, -32010)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testNetworkServiceRejectsInsecureRedirectHop() async {
+        WidgetHostFetchURLProtocol.reset()
+        defer { WidgetHostFetchURLProtocol.reset() }
+
+        WidgetHostFetchURLProtocol.handler = { request in
+            switch request.url?.absoluteString {
+            case "https://example.com/start":
+                return .redirect(
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 302,
+                        httpVersion: nil,
+                        headerFields: ["Location": "http://example.com/middle"]
+                    )!,
+                    URLRequest(url: URL(string: "http://example.com/middle")!)
+                )
+            case "http://example.com/middle":
+                return .redirect(
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 302,
+                        httpVersion: nil,
+                        headerFields: ["Location": "https://example.com/final"]
+                    )!,
+                    URLRequest(url: URL(string: "https://example.com/final")!)
+                )
+            case "https://example.com/final":
+                return .response(
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "text/plain"]
+                    )!,
+                    Data("ok".utf8)
+                )
+            default:
+                return .failure(URLError(.badURL))
+            }
+        }
+
+        let service = WidgetHostNetworkService(protocolClasses: [WidgetHostFetchURLProtocol.self])
+
+        do {
+            _ = try await service.fetch(
+                RuntimeFetchRequestParams(
+                    requestId: "req-redirect-hop-http",
+                    url: "https://example.com/start",
+                    method: "GET",
+                    headers: nil,
+                    body: nil,
+                    bodyEncoding: nil
+                ),
+                context: networkContext(kind: .fetch)
+            )
+            XCTFail("Expected insecure redirect hop to be rejected")
+        } catch let error as RuntimeTransportRPCError {
+            XCTAssertEqual(error.code, -32010)
+            XCTAssertEqual(WidgetHostFetchURLProtocol.requestCount, 1)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testNetworkServiceCancelCancelsPendingFetchTask() async {
         let task = TestNetworkDataTask()
         let service = WidgetHostNetworkService(
@@ -92,7 +229,8 @@ final class WidgetHostAPITests: XCTestCase {
                     headers: nil,
                     body: nil,
                     bodyEncoding: nil
-                )
+                ),
+                context: networkContext(kind: .fetch)
             )
         }
 
@@ -115,7 +253,26 @@ final class WidgetHostAPITests: XCTestCase {
         })
 
         XCTAssertThrowsError(
-            try service.open(RuntimeBrowserOpenParams(url: "tel:123"))
+            try service.open(
+                RuntimeBrowserOpenParams(url: "tel:123"),
+                context: networkContext(kind: .openURL)
+            )
+        ) { error in
+            XCTAssertEqual((error as? RuntimeTransportRPCError)?.code, -32010)
+        }
+    }
+
+    func testNetworkServiceOpenRejectsHTTPURLs() {
+        let service = WidgetHostNetworkService(openURLAction: { _ in
+            XCTFail("openURLAction should not be called for rejected schemes")
+            return false
+        })
+
+        XCTAssertThrowsError(
+            try service.open(
+                RuntimeBrowserOpenParams(url: "http://example.com"),
+                context: networkContext(kind: .openURL)
+            )
         ) { error in
             XCTAssertEqual((error as? RuntimeTransportRPCError)?.code, -32010)
         }
@@ -128,7 +285,10 @@ final class WidgetHostAPITests: XCTestCase {
             return true
         })
 
-        try service.open(RuntimeBrowserOpenParams(url: "https://example.com"))
+        try service.open(
+            RuntimeBrowserOpenParams(url: "https://example.com"),
+            context: networkContext(kind: .openURL)
+        )
         XCTAssertEqual(openedURL?.absoluteString, "https://example.com")
     }
 
@@ -250,6 +410,16 @@ final class WidgetHostAPITests: XCTestCase {
     }
 }
 
+private func networkContext(
+    kind: WidgetHostNetworkRequestKind
+) -> WidgetHostNetworkContext {
+    WidgetHostNetworkContext(
+        widgetID: "demo.widget",
+        instanceID: UUID().uuidString,
+        kind: kind
+    )
+}
+
 private final class TestNetworkDataTask: WidgetHostNetworkDataTask {
     var didResume = false
     var didCancel = false
@@ -267,6 +437,56 @@ private final class TestNetworkDataTask: WidgetHostNetworkDataTask {
     func complete(data: Data?, response: URLResponse?, error: Error?) {
         completion?(data, response, error)
     }
+}
+
+private final class WidgetHostFetchURLProtocol: URLProtocol {
+    enum Event {
+        case response(HTTPURLResponse, Data)
+        case redirect(HTTPURLResponse, URLRequest)
+        case failure(Error)
+    }
+
+    static var handler: ((URLRequest) -> Event)?
+    static var requestCount = 0
+
+    static func reset() {
+        handler = nil
+        requestCount = 0
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        guard let scheme = request.url?.scheme?.lowercased() else {
+            return false
+        }
+
+        return scheme == "http" || scheme == "https"
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        Self.requestCount += 1
+
+        guard let handler = Self.handler else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+
+        switch handler(request) {
+        case .response(let response, let data):
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        case .redirect(let response, let redirectedRequest):
+            client?.urlProtocol(self, wasRedirectedTo: redirectedRequest, redirectResponse: response)
+        case .failure(let error):
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }
 
 private final class TestStorageHandler: WidgetHostLocalStorageHandling {
@@ -289,7 +509,11 @@ private final class TestStorageHandler: WidgetHostLocalStorageHandling {
 
 @MainActor
 private final class TestNetworkHandler: WidgetHostNetworkHandling {
-    func fetch(_ params: RuntimeFetchRequestParams) async throws -> RuntimeFetchResponsePayload {
+    func fetch(
+        _ params: RuntimeFetchRequestParams,
+        context: WidgetHostNetworkContext
+    ) async throws -> RuntimeFetchResponsePayload {
+        _ = context
         XCTFail("Network handler should not be called in this test")
         return RuntimeFetchResponsePayload(status: 200, statusText: "ok", headers: [:], body: nil, bodyEncoding: "text")
     }
@@ -298,7 +522,11 @@ private final class TestNetworkHandler: WidgetHostNetworkHandling {
         XCTFail("Network handler should not be called in this test")
     }
 
-    func open(_ params: RuntimeBrowserOpenParams) throws {
+    func open(
+        _ params: RuntimeBrowserOpenParams,
+        context: WidgetHostNetworkContext
+    ) throws {
+        _ = context
         XCTFail("Network handler should not be called in this test")
     }
 }

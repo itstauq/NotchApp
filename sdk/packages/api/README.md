@@ -57,4 +57,10 @@ The SDK source and examples live in the main repository:
 
 Local widget images live under your package `assets/` directory and can be referenced with paths like `src="assets/cover.png"`.
 
-`Image` supports `contentMode="fill"` by default and `contentMode="fit"` when the image should stay fully visible inside its frame. Remote image URLs are not part of the current surface yet.
+`Image` supports both local package assets and remote image URLs. `contentMode="fill"` is the default, and `contentMode="fit"` keeps the full image visible inside its frame.
+
+Remote image notes:
+
+- widgets use `https://` URLs only
+- remote images are fetched by the host, not inside the widget runtime
+- custom headers, cookies, and auth are not supported yet

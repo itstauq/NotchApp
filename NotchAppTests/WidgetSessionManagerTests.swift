@@ -284,17 +284,19 @@ final class WidgetSessionManagerTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let imageURL = root.appendingPathComponent("cover.png")
+        let instanceID = UUID()
 
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try writeTestPNG(size: CGSize(width: 640, height: 320), to: imageURL)
         defer {
-            WidgetImagePipeline.clearCache()
+            WidgetImagePipeline.clearCache(for: instanceID)
             try? FileManager.default.removeItem(at: root)
         }
 
-        WidgetImagePipeline.clearCache()
+        WidgetImagePipeline.clearCache(for: instanceID)
 
         let loaded = await WidgetImagePipeline.image(
+            for: instanceID,
             at: imageURL,
             targetSize: CGSize(width: 96, height: 48),
             scale: 1,
@@ -303,12 +305,25 @@ final class WidgetSessionManagerTests: XCTestCase {
         XCTAssertNotNil(loaded)
 
         let cached = WidgetImagePipeline.cachedImage(
+            for: instanceID,
             at: imageURL,
             targetSize: CGSize(width: 96, height: 48),
             scale: 1,
             contentMode: "fill"
         )
         XCTAssertNotNil(cached)
+    }
+
+    func testWidgetImagePipelineUsesPerInstanceCacheLimits() {
+        let instanceID = UUID()
+        defer {
+            WidgetImagePipeline.clearCache(for: instanceID)
+        }
+
+        let limits = WidgetImagePipeline.testingCacheLimits(for: instanceID)
+
+        XCTAssertEqual(limits.memory, 24 * 1_048_576)
+        XCTAssertEqual(limits.disk, 32 * 1_048_576)
     }
 
     func testWidgetImagePipelineReadsIntrinsicSizeFromLocalAssetMetadata() throws {
@@ -401,17 +416,19 @@ final class WidgetSessionManagerTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let imageURL = root.appendingPathComponent("large.png")
+        let instanceID = UUID()
 
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try writeTestPNG(size: CGSize(width: 1600, height: 1200), to: imageURL)
         defer {
-            WidgetImagePipeline.clearCache()
+            WidgetImagePipeline.clearCache(for: instanceID)
             try? FileManager.default.removeItem(at: root)
         }
 
-        WidgetImagePipeline.clearCache()
+        WidgetImagePipeline.clearCache(for: instanceID)
 
         let loadedImage = await WidgetImagePipeline.image(
+            for: instanceID,
             at: imageURL,
             targetSize: CGSize(width: 120, height: 80),
             scale: 1,
@@ -427,17 +444,19 @@ final class WidgetSessionManagerTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let imageURL = root.appendingPathComponent("corrupt.png")
+        let instanceID = UUID()
 
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try Data("not an image".utf8).write(to: imageURL)
         defer {
-            WidgetImagePipeline.clearCache()
+            WidgetImagePipeline.clearCache(for: instanceID)
             try? FileManager.default.removeItem(at: root)
         }
 
-        WidgetImagePipeline.clearCache()
+        WidgetImagePipeline.clearCache(for: instanceID)
 
         let image = await WidgetImagePipeline.image(
+            for: instanceID,
             at: imageURL,
             targetSize: CGSize(width: 64, height: 64),
             scale: 1,
@@ -450,10 +469,12 @@ final class WidgetSessionManagerTests: XCTestCase {
     func testWidgetImagePipelineReturnsNilForMissingFiles() async {
         let imageURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: false)
+        let instanceID = UUID()
 
-        WidgetImagePipeline.clearCache()
+        WidgetImagePipeline.clearCache(for: instanceID)
 
         let image = await WidgetImagePipeline.image(
+            for: instanceID,
             at: imageURL,
             targetSize: CGSize(width: 64, height: 64),
             scale: 1,
@@ -461,6 +482,442 @@ final class WidgetSessionManagerTests: XCTestCase {
         )
 
         XCTAssertNil(image)
+    }
+
+    func testWidgetImagePipelineLoadsRemoteHTTPSImages() async throws {
+        try await withRemoteImageProtocol {
+            let imageData = try makeTestPNGData(size: CGSize(width: 320, height: 160))
+            let instanceID = UUID()
+            WidgetRemoteImageURLProtocol.handler = { request in
+                XCTAssertEqual(request.url?.absoluteString, "https://example.com/cover.png")
+                return .response(
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "image/png"]
+                    )!,
+                    [imageData]
+                )
+            }
+
+            let image = await WidgetImagePipeline.image(
+                for: instanceID,
+                at: URL(string: "https://example.com/cover.png")!,
+                targetSize: CGSize(width: 96, height: 48),
+                scale: 1,
+                contentMode: "fill"
+            )
+
+            XCTAssertNotNil(image)
+            XCTAssertEqual(WidgetRemoteImageURLProtocol.requestCount, 1)
+        }
+    }
+
+    func testWidgetImagePipelineRejectsHTTPRemoteImagesBeforeNetworking() async throws {
+        try await withRemoteImageProtocol {
+            let instanceID = UUID()
+            WidgetRemoteImageURLProtocol.handler = { _ in
+                XCTFail("HTTP image requests should be rejected before networking")
+                return .failure(URLError(.badURL))
+            }
+
+            let image = await WidgetImagePipeline.image(
+                for: instanceID,
+                at: URL(string: "http://example.com/cover.png")!,
+                targetSize: CGSize(width: 96, height: 48),
+                scale: 1,
+                contentMode: "fill"
+            )
+
+            XCTAssertNil(image)
+            XCTAssertEqual(WidgetRemoteImageURLProtocol.requestCount, 0)
+        }
+    }
+
+    func testWidgetImagePipelineUsesTargetSizeForRemoteThumbnailRequests() {
+        let targetSize = CGSize(width: 96, height: 48)
+        let requestSize = WidgetImagePipeline.thumbnailRequestSize(
+            for: targetSize,
+            at: URL(string: "https://example.com/cover.png")!
+        )
+
+        XCTAssertEqual(requestSize.width, targetSize.width)
+        XCTAssertEqual(requestSize.height, targetSize.height)
+    }
+
+    func testWidgetImagePipelineRejectsRedirectsToDisallowedSchemes() async throws {
+        try await withRemoteImageProtocol {
+            let instanceID = UUID()
+            WidgetRemoteImageURLProtocol.handler = { request in
+                return .redirect(
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 302,
+                        httpVersion: nil,
+                        headerFields: ["Location": "http://example.com/cover.png"]
+                    )!,
+                    URLRequest(url: URL(string: "http://example.com/cover.png")!)
+                )
+            }
+
+            let finished = expectation(description: "redirect rejected promptly")
+            Task {
+                let image = await WidgetImagePipeline.image(
+                    for: instanceID,
+                    at: URL(string: "https://example.com/cover.png")!,
+                    targetSize: CGSize(width: 96, height: 48),
+                    scale: 1,
+                    contentMode: "fill"
+                )
+
+                XCTAssertNil(image)
+                finished.fulfill()
+            }
+
+            await fulfillment(of: [finished], timeout: 1.0)
+            XCTAssertEqual(WidgetRemoteImageURLProtocol.requestCount, 1)
+        }
+    }
+
+    func testWidgetImagePipelineRejectsClearlyNonImageRemoteResponses() async throws {
+        try await withRemoteImageProtocol {
+            let instanceID = UUID()
+            WidgetRemoteImageURLProtocol.handler = { request in
+                return .response(
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "text/plain"]
+                    )!,
+                    [Data("hello".utf8)]
+                )
+            }
+
+            let image = await WidgetImagePipeline.image(
+                for: instanceID,
+                at: URL(string: "https://example.com/not-image.txt")!,
+                targetSize: CGSize(width: 96, height: 48),
+                scale: 1,
+                contentMode: "fill"
+            )
+
+            XCTAssertNil(image)
+        }
+    }
+
+    func testWidgetImagePipelineRejectsOversizedRemoteResponses() async throws {
+        try await withRemoteImageProtocol {
+            let oversized = Data(repeating: 0, count: (3 * 1024 * 1024) + 1024)
+            let instanceID = UUID()
+            WidgetRemoteImageURLProtocol.handler = { request in
+                return .response(
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "image/png"]
+                    )!,
+                    [oversized]
+                )
+            }
+
+            let image = await WidgetImagePipeline.image(
+                for: instanceID,
+                at: URL(string: "https://example.com/too-large.png")!,
+                targetSize: CGSize(width: 96, height: 48),
+                scale: 1,
+                contentMode: "fill"
+            )
+
+            XCTAssertNil(image)
+        }
+    }
+
+    func testWidgetImagePipelineReusesRemoteImageCache() async throws {
+        try await withRemoteImageProtocol {
+            let imageData = try makeTestPNGData(size: CGSize(width: 320, height: 160))
+            let instanceID = UUID()
+            WidgetRemoteImageURLProtocol.handler = { request in
+                return .response(
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "image/png"]
+                    )!,
+                    [imageData]
+                )
+            }
+
+            let url = URL(string: "https://example.com/cached-cover.png")!
+            let first = await WidgetImagePipeline.image(
+                for: instanceID,
+                at: url,
+                targetSize: CGSize(width: 96, height: 48),
+                scale: 1,
+                contentMode: "fill"
+            )
+            let second = await WidgetImagePipeline.image(
+                for: instanceID,
+                at: url,
+                targetSize: CGSize(width: 96, height: 48),
+                scale: 1,
+                contentMode: "fill"
+            )
+
+            XCTAssertNotNil(first)
+            XCTAssertNotNil(second)
+            XCTAssertEqual(WidgetRemoteImageURLProtocol.requestCount, 1)
+        }
+    }
+
+    func testWidgetImagePipelineClearCacheInvalidatesRemoteDiskCache() async throws {
+        try await withRemoteImageProtocol {
+            let imageData = try makeTestPNGData(size: CGSize(width: 320, height: 160))
+            let instanceID = UUID()
+            WidgetRemoteImageURLProtocol.handler = { request in
+                return .response(
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "image/png"]
+                    )!,
+                    [imageData]
+                )
+            }
+
+            let url = URL(string: "https://example.com/cache-refresh.png")!
+            let first = await WidgetImagePipeline.image(
+                for: instanceID,
+                at: url,
+                targetSize: CGSize(width: 96, height: 48),
+                scale: 1,
+                contentMode: "fill"
+            )
+
+            XCTAssertNotNil(first)
+            XCTAssertEqual(WidgetRemoteImageURLProtocol.requestCount, 1)
+
+            WidgetImagePipeline.clearCache(for: instanceID)
+
+            let second = await WidgetImagePipeline.image(
+                for: instanceID,
+                at: url,
+                targetSize: CGSize(width: 96, height: 48),
+                scale: 1,
+                contentMode: "fill"
+            )
+
+            XCTAssertNotNil(second)
+            XCTAssertEqual(WidgetRemoteImageURLProtocol.requestCount, 2)
+        }
+    }
+
+    func testWidgetImagePipelineDoesNotShareLocalMemoryCacheBetweenInstances() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let imageURL = root.appendingPathComponent("cover.png")
+        let firstInstanceID = UUID()
+        let secondInstanceID = UUID()
+
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try writeTestPNG(size: CGSize(width: 640, height: 320), to: imageURL)
+        defer {
+            WidgetImagePipeline.clearCaches(for: [firstInstanceID, secondInstanceID])
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let loaded = await WidgetImagePipeline.image(
+            for: firstInstanceID,
+            at: imageURL,
+            targetSize: CGSize(width: 96, height: 48),
+            scale: 1,
+            contentMode: "fill"
+        )
+        XCTAssertNotNil(loaded)
+
+        let firstCached = WidgetImagePipeline.cachedImage(
+            for: firstInstanceID,
+            at: imageURL,
+            targetSize: CGSize(width: 96, height: 48),
+            scale: 1,
+            contentMode: "fill"
+        )
+        let secondCached = WidgetImagePipeline.cachedImage(
+            for: secondInstanceID,
+            at: imageURL,
+            targetSize: CGSize(width: 96, height: 48),
+            scale: 1,
+            contentMode: "fill"
+        )
+
+        XCTAssertNotNil(firstCached)
+        XCTAssertNil(secondCached)
+    }
+
+    func testWidgetImagePipelineDoesNotShareRemoteDiskCacheBetweenInstances() async throws {
+        try await withRemoteImageProtocol {
+            let imageData = try makeTestPNGData(size: CGSize(width: 320, height: 160))
+            let firstInstanceID = UUID()
+            let secondInstanceID = UUID()
+            WidgetRemoteImageURLProtocol.handler = { request in
+                return .response(
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "image/png"]
+                    )!,
+                    [imageData]
+                )
+            }
+
+            let url = URL(string: "https://example.com/shared-cover.png")!
+            let first = await WidgetImagePipeline.image(
+                for: firstInstanceID,
+                at: url,
+                targetSize: CGSize(width: 96, height: 48),
+                scale: 1,
+                contentMode: "fill"
+            )
+            let second = await WidgetImagePipeline.image(
+                for: secondInstanceID,
+                at: url,
+                targetSize: CGSize(width: 96, height: 48),
+                scale: 1,
+                contentMode: "fill"
+            )
+
+            XCTAssertNotNil(first)
+            XCTAssertNotNil(second)
+            XCTAssertEqual(WidgetRemoteImageURLProtocol.requestCount, 2)
+        }
+    }
+
+    func testWidgetImagePipelineClearCacheOnlyInvalidatesTargetInstance() async throws {
+        try await withRemoteImageProtocol {
+            let imageData = try makeTestPNGData(size: CGSize(width: 320, height: 160))
+            let firstInstanceID = UUID()
+            let secondInstanceID = UUID()
+            WidgetRemoteImageURLProtocol.handler = { request in
+                return .response(
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 200,
+                        httpVersion: nil,
+                        headerFields: ["Content-Type": "image/png"]
+                    )!,
+                    [imageData]
+                )
+            }
+
+            let url = URL(string: "https://example.com/per-instance-cache.png")!
+            let first = await WidgetImagePipeline.image(
+                for: firstInstanceID,
+                at: url,
+                targetSize: CGSize(width: 96, height: 48),
+                scale: 1,
+                contentMode: "fill"
+            )
+            let second = await WidgetImagePipeline.image(
+                for: secondInstanceID,
+                at: url,
+                targetSize: CGSize(width: 96, height: 48),
+                scale: 1,
+                contentMode: "fill"
+            )
+
+            XCTAssertNotNil(first)
+            XCTAssertNotNil(second)
+            XCTAssertEqual(WidgetRemoteImageURLProtocol.requestCount, 2)
+
+            WidgetImagePipeline.clearCache(for: firstInstanceID)
+
+            let reloadedFirst = await WidgetImagePipeline.image(
+                for: firstInstanceID,
+                at: url,
+                targetSize: CGSize(width: 96, height: 48),
+                scale: 1,
+                contentMode: "fill"
+            )
+            let cachedSecond = await WidgetImagePipeline.image(
+                for: secondInstanceID,
+                at: url,
+                targetSize: CGSize(width: 96, height: 48),
+                scale: 1,
+                contentMode: "fill"
+            )
+
+            XCTAssertNotNil(reloadedFirst)
+            XCTAssertNotNil(cachedSecond)
+            XCTAssertEqual(WidgetRemoteImageURLProtocol.requestCount, 3)
+        }
+    }
+
+    func testWidgetImagePipelineClearCacheCancelsInFlightRemoteRequestsForInstance() async throws {
+        try await withRemoteImageProtocol {
+            let staleData = try makeTestPNGData(size: CGSize(width: 320, height: 160))
+            let freshData = try makeTestPNGData(size: CGSize(width: 640, height: 320))
+            let instanceID = UUID()
+            let url = URL(string: "https://example.com/in-flight-cache.png")!
+            let releaseStaleResponse = DispatchSemaphore(value: 0)
+            var requestNumber = 0
+
+            WidgetRemoteImageURLProtocol.handler = { request in
+                requestNumber += 1
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "image/png"]
+                )!
+
+                if requestNumber == 1 {
+                    return .delayedResponse(response, [staleData], releaseStaleResponse)
+                }
+
+                return .response(response, [freshData])
+            }
+
+            let firstTask = Task {
+                await WidgetImagePipeline.image(
+                    for: instanceID,
+                    at: url,
+                    targetSize: CGSize(width: 96, height: 48),
+                    scale: 1,
+                    contentMode: "fill"
+                )
+            }
+
+            while WidgetRemoteImageURLProtocol.requestCount < 1 {
+                await Task.yield()
+            }
+
+            WidgetImagePipeline.clearCache(for: instanceID)
+
+            let freshImage = await WidgetImagePipeline.image(
+                for: instanceID,
+                at: url,
+                targetSize: CGSize(width: 96, height: 48),
+                scale: 1,
+                contentMode: "fill"
+            )
+            XCTAssertNotNil(freshImage)
+            XCTAssertEqual(WidgetRemoteImageURLProtocol.requestCount, 2)
+
+            let firstFinished = expectation(description: "stale request canceled")
+            Task {
+                let canceledImage = await firstTask.value
+                XCTAssertNil(canceledImage)
+                firstFinished.fulfill()
+            }
+
+            await fulfillment(of: [firstFinished], timeout: 1.0)
+            releaseStaleResponse.signal()
+        }
     }
 }
 
@@ -498,7 +955,7 @@ private func buttonNode(title: String) -> RuntimeJSONValue {
     ])
 }
 
-private func writeTestPNG(size: CGSize, to url: URL) throws {
+private func makeTestPNGData(size: CGSize) throws -> Data {
     let width = Int(size.width)
     let height = Int(size.height)
     let rep = NSBitmapImageRep(
@@ -515,8 +972,11 @@ private func writeTestPNG(size: CGSize, to url: URL) throws {
     )
 
     guard let rep else {
-        XCTFail("Failed to create bitmap image rep")
-        return
+        throw NSError(
+            domain: "WidgetSessionManagerTests",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Failed to create bitmap image rep"]
+        )
     }
 
     NSGraphicsContext.saveGraphicsState()
@@ -525,8 +985,11 @@ private func writeTestPNG(size: CGSize, to url: URL) throws {
     NSBezierPath(rect: NSRect(origin: .zero, size: size)).fill()
     NSGraphicsContext.restoreGraphicsState()
 
-    let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
-    try data.write(to: url)
+    return try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+}
+
+private func writeTestPNG(size: CGSize, to url: URL) throws {
+    try makeTestPNGData(size: size).write(to: url)
 }
 
 private func writeTestJPEG(
@@ -608,4 +1071,85 @@ private func XCTAssertRequestsFullTree(
     }
 
     XCTAssertFalse(reason.isEmpty, file: file, line: line)
+}
+
+private func withRemoteImageProtocol(
+    _ body: () async throws -> Void
+) async throws {
+    WidgetRemoteImageURLProtocol.reset()
+    WidgetImagePipeline.resetRemotePipelinesForTesting(
+        protocolClasses: [WidgetRemoteImageURLProtocol.self]
+    )
+    defer {
+        WidgetRemoteImageURLProtocol.reset()
+        WidgetImagePipeline.resetRemotePipelinesForTesting()
+    }
+
+    try await body()
+}
+
+private final class WidgetRemoteImageURLProtocol: URLProtocol {
+    enum Event {
+        case response(HTTPURLResponse, [Data])
+        case delayedResponse(HTTPURLResponse, [Data], DispatchSemaphore)
+        case redirect(HTTPURLResponse, URLRequest)
+        case failure(Error)
+    }
+
+    static var handler: ((URLRequest) -> Event)?
+    static var requestCount = 0
+    private var stopped = false
+
+    static func reset() {
+        handler = nil
+        requestCount = 0
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        guard let scheme = request.url?.scheme?.lowercased() else {
+            return false
+        }
+
+        return scheme == "http" || scheme == "https"
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        Self.requestCount += 1
+
+        guard let handler = Self.handler else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+
+        switch handler(request) {
+        case .response(let response, let dataChunks):
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            for chunk in dataChunks {
+                client?.urlProtocol(self, didLoad: chunk)
+            }
+            client?.urlProtocolDidFinishLoading(self)
+        case .delayedResponse(let response, let dataChunks, let semaphore):
+            DispatchQueue.global(qos: .default).async { [weak self] in
+                semaphore.wait()
+                guard let self, !self.stopped else { return }
+                self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                for chunk in dataChunks {
+                    self.client?.urlProtocol(self, didLoad: chunk)
+                }
+                self.client?.urlProtocolDidFinishLoading(self)
+            }
+        case .redirect(let response, let redirectedRequest):
+            client?.urlProtocol(self, wasRedirectedTo: redirectedRequest, redirectResponse: response)
+        case .failure(let error):
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {
+        stopped = true
+    }
 }

@@ -139,7 +139,7 @@ Widget callbacks receive payload objects when the component provides one:
 - `Button`, `Row`, `Checkbox`, and `IconButton` use `onPress`
 - `Input` uses `onChange` and `onSubmit`, and those callbacks receive `{ value }`
 
-Current `Image` support is limited to package-local assets such as `src="assets/cover.png"`. It supports `contentMode="fill"` by default and `contentMode="fit"` when you want the entire image visible. Remote image URLs come later.
+`Image` supports both package-local assets such as `src="assets/cover.png"` and remote image URLs. It uses `contentMode="fill"` by default and supports `contentMode="fit"` when you want the entire image visible.
 
 ## Manifest
 
@@ -187,7 +187,7 @@ Current validation rules:
 - `Circle`
 - `RoundedRect`
 
-The fastest references are the starter widget in [sdk/examples/hello](/Users/tauquir/Projects/NotchApp2/sdk/examples/hello) and the local image example in [sdk/examples/local-image](/Users/tauquir/Projects/NotchApp2/sdk/examples/local-image).
+The fastest references are the starter widget in [sdk/examples/hello](/Users/tauquir/Projects/NotchApp2/sdk/examples/hello), the local image example in [sdk/examples/local-image](/Users/tauquir/Projects/NotchApp2/sdk/examples/local-image), and the remote image example in [sdk/examples/remote-image](/Users/tauquir/Projects/NotchApp2/sdk/examples/remote-image).
 
 ## Local Images
 
@@ -206,6 +206,27 @@ export default function Widget() {
 ```
 
 `notchapp build` and `notchapp dev` copy `assets/` into `.notch/build/assets`, so `src="assets/cover.png"` works in both local development and packaged widget installs.
+
+## Remote Images
+
+Remote image URLs are fetched by the host image pipeline, not by widget code.
+
+- widgets can use `https://` remote image URLs
+- remote image requests are anonymous and do not support custom headers, cookies, or auth yet
+
+Example:
+
+```tsx
+import { Image, RoundedRect } from "@notchapp/api";
+
+export default function Widget() {
+  return (
+    <RoundedRect frame={{ width: 72, height: 72 }} clipShape={{ type: "roundedRect", cornerRadius: 18 }}>
+      <Image src="https://placehold.co/640x360/png?text=Remote+Image" contentMode="fit" />
+    </RoundedRect>
+  );
+}
+```
 
 `Image` currently supports:
 
