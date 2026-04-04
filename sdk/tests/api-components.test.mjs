@@ -44,7 +44,13 @@ function loadAPI() {
         case "./functions/openURL":
           return { openURL() {} };
         case "./runtime":
-          return { LocalStorage: {}, getPreferenceValues() { return { mailbox: "inbox" }; } };
+          return {
+            LocalStorage: {},
+            getPreferenceValues() { return { mailbox: "inbox" }; },
+            setPreferenceValue() {},
+            listCameras() {},
+            selectCamera() {},
+          };
         default:
           throw new Error(`Unexpected dependency: ${specifier}`);
       }
@@ -75,6 +81,9 @@ test("@notchapp/api exports the extended non-image component surface", () => {
     "Circle",
     "RoundedRect",
     "getPreferenceValues",
+    "setPreferenceValue",
+    "listCameras",
+    "selectCamera",
   ]) {
     assert.equal(typeof api[name], "function", `${name} should be exported`);
   }

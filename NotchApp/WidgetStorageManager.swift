@@ -14,6 +14,7 @@ enum WidgetStoragePreferenceKind {
     case password
     case checkbox
     case dropdown
+    case camera
 }
 
 struct WidgetStoragePreferenceDefinition {
@@ -28,7 +29,7 @@ struct WidgetStoragePreferenceDefinition {
         switch kind {
         case .text, .password:
             return resolvedValue.stringValue?.isEmpty ?? true
-        case .checkbox, .dropdown:
+        case .checkbox, .dropdown, .camera:
             return false
         }
     }

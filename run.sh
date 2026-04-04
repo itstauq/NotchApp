@@ -10,12 +10,16 @@ xcodebuild \
   -derivedDataPath "$DERIVED_DATA_PATH" \
   build 2>&1 | grep -E "(error:|warning:|BUILD)" | tail -10
 
-pkill -x NotchApp 2>/dev/null || true
+OLD_PIDS=$(pgrep -x NotchApp 2>/dev/null || true)
+if [ -n "$OLD_PIDS" ]; then
+  pkill -x NotchApp 2>/dev/null || true
 
-for _ in {1..100}; do
-    pgrep -x NotchApp >/dev/null || break
-    sleep 0.1
-done
+  for pid in $OLD_PIDS; do
+    while kill -0 "$pid" 2>/dev/null; do
+      sleep 0.5
+    done
+  done
+fi
 
 open "$APP_PATH"
 echo "Running. Logs: tail -f notchapp.log"

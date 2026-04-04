@@ -42,6 +42,7 @@ enum Preferences {
     private static let keyboardShortcutsEnabledKey = "keyboardShortcutsEnabled"
     private static let toggleNotchShortcutKeyCodeKey = "toggleNotchShortcutKeyCode"
     private static let toggleNotchShortcutModifiersKey = "toggleNotchShortcutModifiers"
+    private static let selectedCameraDeviceIDKey = "selectedCameraDeviceID"
 
     enum OpenNotchMode: String {
         case click
@@ -203,6 +204,24 @@ enum Preferences {
                 UserDefaults.standard.set(0, forKey: toggleNotchShortcutModifiersKey)
             }
             NotificationCenter.default.post(name: .keyboardShortcutPreferenceDidChange, object: nil)
+        }
+    }
+
+    static var selectedCameraDeviceID: String? {
+        get {
+            guard let value = UserDefaults.standard.string(forKey: selectedCameraDeviceIDKey),
+                  !value.isEmpty else {
+                return nil
+            }
+
+            return value
+        }
+        set {
+            if let newValue, !newValue.isEmpty {
+                UserDefaults.standard.set(newValue, forKey: selectedCameraDeviceIDKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: selectedCameraDeviceIDKey)
+            }
         }
     }
 }

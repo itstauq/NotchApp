@@ -11,6 +11,7 @@ const { DefaultEventPriority } = require("react-reconciler/constants");
 const OVERLAY_SLOT_TYPE = "__notch_overlay";
 const LEADING_ACCESSORY_SLOT_TYPE = "__notch_leadingAccessory";
 const TRAILING_ACCESSORY_SLOT_TYPE = "__notch_trailingAccessory";
+const MENU_LABEL_SLOT_TYPE = "__notch_menuLabel";
 let nextHostNodeId = 0;
 
 function appendChild(parent, child) {
@@ -56,7 +57,8 @@ function isSlotType(type) {
   return (
     type === OVERLAY_SLOT_TYPE ||
     type === LEADING_ACCESSORY_SLOT_TYPE ||
-    type === TRAILING_ACCESSORY_SLOT_TYPE
+    type === TRAILING_ACCESSORY_SLOT_TYPE ||
+    type === MENU_LABEL_SLOT_TYPE
   );
 }
 
@@ -200,6 +202,7 @@ function snapshotNode(node) {
   const overlays = [];
   let leadingAccessory;
   let trailingAccessory;
+  let menuLabel;
 
   for (const child of node.children) {
     if (child.type === OVERLAY_SLOT_TYPE) {
@@ -223,6 +226,11 @@ function snapshotNode(node) {
       continue;
     }
 
+    if (child.type === MENU_LABEL_SLOT_TYPE) {
+      menuLabel = snapshotAccessory(child.children);
+      continue;
+    }
+
     if (node.type === "Text" && child.type === "__text") {
       continue;
     }
@@ -243,6 +251,10 @@ function snapshotNode(node) {
 
   if (trailingAccessory !== undefined) {
     props.trailingAccessory = trailingAccessory;
+  }
+
+  if (menuLabel !== undefined) {
+    props.label = menuLabel;
   }
 
   return {

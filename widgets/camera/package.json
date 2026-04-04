@@ -20,6 +20,22 @@
     "icon": "camera.fill",
     "minSpan": 3,
     "maxSpan": 9,
-    "entry": "src/index.tsx"
+    "entry": "src/index.tsx",
+    "preferences": [
+      {
+        "name": "cameraDeviceId",
+        "title": "Camera",
+        "description": "Choose which camera this widget should use.",
+        "type": "camera"
+      },
+      {
+        "name": "mirrorPreview",
+        "title": "Mirror Preview",
+        "description": "Flip the preview horizontally like a mirror.",
+        "type": "checkbox",
+        "label": "Mirror Preview",
+        "default": true
+      }
+    ]
   }
 }

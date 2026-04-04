@@ -841,6 +841,16 @@ private struct RuntimeV2NodeView: View {
             return AnyView(
                 RuntimeV2CameraNodeView(node: node)
             )
+        case "Menu":
+            return AnyView(
+                RuntimeV2MenuNodeView(
+                    node: node,
+                    vm: vm,
+                    instanceID: instanceID,
+                    assetRootURL: assetRootURL,
+                    path: path
+                )
+            )
         case "Button":
             return AnyView(
                 Button {
@@ -1339,8 +1349,14 @@ private struct RuntimeV2NodeView: View {
     }
 }
 
+struct WidgetCameraDeviceOption: Codable, Equatable {
+    var id: String
+    var name: String
+    var selected: Bool
+}
+
 @MainActor
-private final class WidgetCameraController: ObservableObject {
+final class WidgetCameraController: ObservableObject {
     static let shared = WidgetCameraController()
 
     enum State: Equatable {
@@ -1358,6 +1374,7 @@ private final class WidgetCameraController: ObservableObject {
     private let sessionQueue = DispatchQueue(label: "com.notchapp.camera")
     private var didConfigureSession = false
     private var isStarting = false
+    private var currentDeviceID: String?
     private var visiblePreviewIDs: Set<UUID> = []
     private var suspendedPanelsPendingRestore: [SuspendedNotchPanelState]?
     private var appDidBecomeActiveObserver: NSObjectProtocol?
@@ -1383,6 +1400,54 @@ private final class WidgetCameraController: ObservableObject {
             state = .denied
         @unknown default:
             state = .unavailable("Camera unavailable.")
+        }
+    }
+
+    func availableDevices() -> [WidgetCameraDeviceOption] {
+        let devices = discoverDevices()
+        let selectedDeviceID = effectiveSelectedDeviceID(from: devices)
+
+        if devices.isEmpty, let fallback = AVCaptureDevice.default(for: .video) {
+            return [
+                WidgetCameraDeviceOption(
+                    id: fallback.uniqueID,
+                    name: fallback.localizedName,
+                    selected: selectedDeviceID == fallback.uniqueID
+                )
+            ]
+        }
+
+        return devices.map { device in
+            WidgetCameraDeviceOption(
+                id: device.uniqueID,
+                name: device.localizedName,
+                selected: selectedDeviceID == device.uniqueID
+            )
+        }
+    }
+
+    func selectDevice(id: String) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            sessionQueue.async {
+                do {
+                    try self.configureSessionIfNeeded()
+                    try self.switchToDeviceIfNeeded(id: id)
+                    if !self.session.isRunning {
+                        self.session.startRunning()
+                    }
+
+                    Task { @MainActor in
+                        Preferences.selectedCameraDeviceID = id
+                        self.state = .ready
+                    }
+                    continuation.resume()
+                } catch {
+                    Task { @MainActor in
+                        self.state = .unavailable(error.localizedDescription)
+                    }
+                    continuation.resume(throwing: error)
+                }
+            }
         }
     }
 
@@ -1462,8 +1527,11 @@ private final class WidgetCameraController: ObservableObject {
 
         session.sessionPreset = .high
 
+        let devices = discoverDevices()
+        let preferredDeviceID = Preferences.selectedCameraDeviceID
         let device =
-            AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
+            devices.first(where: { $0.uniqueID == preferredDeviceID })
+            ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
             ?? AVCaptureDevice.default(for: .video)
 
         guard let device else {
@@ -1484,7 +1552,156 @@ private final class WidgetCameraController: ObservableObject {
         }
 
         session.addInput(input)
+        currentDeviceID = device.uniqueID
         didConfigureSession = true
+    }
+
+    private func switchToDeviceIfNeeded(id: String) throws {
+        guard currentDeviceID != id else { return }
+
+        let devices = discoverDevices()
+
+        let fallback = AVCaptureDevice.default(for: .video)
+        guard let device = devices.first(where: { $0.uniqueID == id }) ?? fallback, device.uniqueID == id else {
+            throw NSError(
+                domain: "NotchCamera",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "Requested camera is no longer available."]
+            )
+        }
+
+        let input = try AVCaptureDeviceInput(device: device)
+
+        session.beginConfiguration()
+        defer {
+            session.commitConfiguration()
+        }
+
+        for existingInput in session.inputs {
+            session.removeInput(existingInput)
+        }
+
+        guard session.canAddInput(input) else {
+            throw NSError(
+                domain: "NotchCamera",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Unable to switch to the selected camera."]
+            )
+        }
+
+        session.addInput(input)
+        currentDeviceID = device.uniqueID
+    }
+
+    private func discoverDevices() -> [AVCaptureDevice] {
+        AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInWideAngleCamera, .externalUnknown],
+            mediaType: .video,
+            position: .unspecified
+        ).devices
+    }
+
+    private func effectiveSelectedDeviceID(from devices: [AVCaptureDevice]) -> String? {
+        if let currentDeviceID {
+            return currentDeviceID
+        }
+
+        if let preferredDeviceID = Preferences.selectedCameraDeviceID,
+           devices.contains(where: { $0.uniqueID == preferredDeviceID }) {
+            return preferredDeviceID
+        }
+
+        if let defaultFrontCamera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) {
+            return defaultFrontCamera.uniqueID
+        }
+
+        if let firstDevice = devices.first {
+            return firstDevice.uniqueID
+        }
+
+        return AVCaptureDevice.default(for: .video)?.uniqueID
+    }
+}
+
+private struct RuntimeV2MenuNodeView: View {
+    var node: RenderNodeV2
+    var vm: NotchViewModel
+    var instanceID: UUID
+    var assetRootURL: URL
+    var path: [Int]
+
+    var body: some View {
+        Menu {
+            ForEach(Array(node.children.enumerated()), id: \.offset) { child in
+                RuntimeV2MenuItemView(
+                    node: child.element,
+                    vm: vm,
+                    instanceID: instanceID
+                )
+            }
+        } label: {
+            if let label = node.decoded("label", as: RenderNodeV2.self) {
+                RuntimeV2NodeView(
+                    node: label,
+                    vm: vm,
+                    instanceID: instanceID,
+                    assetRootURL: assetRootURL,
+                    path: path + [-1]
+                )
+            } else {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.82))
+            }
+        }
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+    }
+}
+
+private struct RuntimeV2MenuItemView: View {
+    var node: RenderNodeV2
+    var vm: NotchViewModel
+    var instanceID: UUID
+
+    var body: some View {
+        switch node.type {
+        case "Divider":
+            Divider()
+        case "Button":
+            if node.value("checked") != nil {
+                Toggle(isOn: checkedBinding) {
+                    Text(node.string("title") ?? "Action")
+                }
+                .disabled(node.bool("disabled") ?? false)
+            } else {
+                Button(node.string("title") ?? "Action") {
+                    guard let callbackID = node.string("onPress") else { return }
+                    vm.widgetRuntime.triggerCallback(callbackID: callbackID, for: instanceID)
+                }
+                .disabled((node.bool("disabled") ?? false) || node.string("onPress") == nil)
+            }
+        default:
+            if let title = node.string("title"), !title.isEmpty {
+                Text(title)
+            } else if let text = node.string("text"), !text.isEmpty {
+                Text(text)
+            } else {
+                EmptyView()
+            }
+        }
+    }
+
+    private var checkedBinding: Binding<Bool> {
+        Binding(
+            get: {
+                node.bool("checked") ?? false
+            },
+            set: { _ in
+                guard let callbackID = node.string("onPress"), !(node.bool("disabled") ?? false) else { return }
+                vm.widgetRuntime.triggerCallback(callbackID: callbackID, for: instanceID)
+            }
+        )
     }
 }
 
@@ -1493,11 +1710,15 @@ private struct RuntimeV2CameraNodeView: View {
     @StateObject private var controller = WidgetCameraController.shared
     @State private var previewID = UUID()
 
+    private var isMirrored: Bool {
+        node.bool("mirrored") ?? false
+    }
+
     var body: some View {
         Group {
             switch controller.state {
             case .ready:
-                RuntimeV2CameraSessionView(session: controller.session)
+                RuntimeV2CameraSessionView(session: controller.session, mirrored: isMirrored)
             case .needsPermission:
                 permissionPrompt
             case .denied:
@@ -1627,11 +1848,13 @@ private extension WidgetCameraController {
 
 private struct RuntimeV2CameraSessionView: NSViewRepresentable {
     var session: AVCaptureSession
+    var mirrored: Bool
 
     func makeNSView(context: Context) -> RuntimeV2CameraNSView {
         let view = RuntimeV2CameraNSView()
         view.layer?.backgroundColor = NSColor.clear.cgColor
         view.previewLayer.session = session
+        view.setMirrored(mirrored)
         return view
     }
 
@@ -1639,6 +1862,7 @@ private struct RuntimeV2CameraSessionView: NSViewRepresentable {
         if nsView.previewLayer.session !== session {
             nsView.previewLayer.session = session
         }
+        nsView.setMirrored(mirrored)
     }
 }
 
@@ -1661,10 +1885,19 @@ private final class RuntimeV2CameraNSView: NSView {
         layer as! AVCaptureVideoPreviewLayer
     }
 
+    func setMirrored(_ mirrored: Bool) {
+        guard let connection = previewLayer.connection else { return }
+        connection.automaticallyAdjustsVideoMirroring = false
+        if connection.isVideoMirroringSupported {
+            connection.isVideoMirrored = mirrored
+        }
+    }
+
     override func layout() {
         super.layout()
         previewLayer.frame = bounds
         previewLayer.videoGravity = .resizeAspectFill
+        setMirrored(previewLayer.connection?.isVideoMirrored ?? false)
     }
 }
 

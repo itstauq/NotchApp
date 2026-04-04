@@ -347,22 +347,6 @@ private struct GeneralSettingsPage: View {
     }
 }
 
-private enum WidgetDetailsTab: String, CaseIterable, Identifiable {
-    case configuration
-    case info
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .configuration:
-            return "Configuration"
-        case .info:
-            return "Info"
-        }
-    }
-}
-
 private struct WidgetsSettingsPage: View {
     var accentColor: AppAccentColor
 
@@ -370,7 +354,6 @@ private struct WidgetsSettingsPage: View {
     @State private var snapshot = WidgetSettingsSnapshot.empty
     @State private var selectedViewID: UUID?
     @State private var selectedWidgetID: UUID?
-    @State private var detailTab: WidgetDetailsTab = .configuration
     @State private var selectedPreferenceValues: [String: RuntimeJSONValue] = [:]
 
     private var selectedView: WidgetSettingsSnapshot.ViewSection? {
@@ -413,18 +396,15 @@ private struct WidgetsSettingsPage: View {
                     )
 
                     if let selectedItem {
-                        WidgetsDetailTabs(
-                            selectedTab: $detailTab,
-                            accentTint: accentColor.color
-                        )
+                        VStack(spacing: 18) {
+                            WidgetConfigurationSection(
+                                item: selectedItem,
+                                preferenceValues: $selectedPreferenceValues,
+                                onSavePreference: savePreferenceValue
+                            )
 
-                        WidgetsDetailPanel(
-                            item: selectedItem,
-                            selectedTab: detailTab,
-                            preferenceValues: $selectedPreferenceValues,
-                            onSavePreference: savePreferenceValue,
-                            accentTint: accentColor.color
-                        )
+                            WidgetInfoSection(item: selectedItem)
+                        }
                     }
                 }
             }
@@ -511,6 +491,11 @@ private struct WidgetsSettingsPage: View {
             widgetID: selectedItem.widgetID,
             instanceID: selectedItem.id.uuidString
         )
+        for preference in selectedItem.preferences where preference.type == .camera {
+            if let selectedCameraID = WidgetCameraController.shared.availableDevices().first(where: { $0.selected })?.id {
+                selectedPreferenceValues[preference.name] = .string(selectedCameraID)
+            }
+        }
     }
 
     private func savePreferenceValue(name: String, value: RuntimeJSONValue?) {
@@ -523,6 +508,13 @@ private struct WidgetsSettingsPage: View {
                 name: name,
                 value: value
             )
+            if let preference = selectedItem.preferences.first(where: { $0.name == name }),
+               preference.type == .camera,
+               let selectedCameraID = value?.stringValue,
+               !selectedCameraID.isEmpty {
+                Preferences.selectedCameraDeviceID = selectedCameraID
+                Task { try? await WidgetCameraController.shared.selectDevice(id: selectedCameraID) }
+            }
             loadSelectedPreferenceValues()
             NotificationCenter.default.post(
                 name: .widgetPreferencesDidChange,
@@ -538,42 +530,6 @@ private struct WidgetsSettingsPage: View {
     private func applyPendingWidgetSelectionIfNeeded() {
         guard let instanceID = AppSettingsWindow.consumeRequestedWidgetInstanceID() else { return }
         selectWidget(instanceID: instanceID)
-    }
-}
-
-private struct WidgetsDetailTabs: View {
-    @Binding var selectedTab: WidgetDetailsTab
-    var accentTint: Color
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ForEach(WidgetDetailsTab.allCases) { tab in
-                Button {
-                    selectedTab = tab
-                } label: {
-                    Text(tab.title)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(selectedTab == tab ? accentTint.opacity(0.96) : .white.opacity(0.62))
-                        .padding(.horizontal, 12)
-                        .frame(height: 30)
-                        .background(
-                            Capsule()
-                                .fill(selectedTab == tab ? accentTint.opacity(0.18) : .white.opacity(0.04))
-                        )
-                        .overlay(
-                            Capsule()
-                                .strokeBorder(
-                                    selectedTab == tab ? accentTint.opacity(0.34) : .white.opacity(0.05),
-                                    lineWidth: 1
-                                )
-                        )
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-
-            Spacer(minLength: 0)
-        }
     }
 }
 
@@ -800,165 +756,67 @@ private struct WidgetSelectionPreviewCard: View {
     }
 }
 
-private struct WidgetsDetailPanel: View {
+private struct WidgetConfigurationSection: View {
     var item: WidgetSettingsSnapshot.Item
-    var selectedTab: WidgetDetailsTab
     @Binding var preferenceValues: [String: RuntimeJSONValue]
     var onSavePreference: (String, RuntimeJSONValue?) -> Void
-    var accentTint: Color
 
-    var body: some View {
-        Group {
-            switch selectedTab {
-            case .configuration:
-                WidgetConfigurationCard(
-                    item: item,
-                    preferenceValues: $preferenceValues,
-                    onSavePreference: onSavePreference,
-                    accentTint: accentTint
-                )
-            case .info:
-                WidgetInfoCard(item: item, accentTint: accentTint)
+    private var displayPreferences: [WidgetPreferenceDefinition] {
+        item.preferences.map { preference in
+            guard preference.type == .camera else {
+                return preference
             }
+
+            var updated = preference
+            updated.data = WidgetCameraController.shared.availableDevices().map { device in
+                WidgetPreferenceDropdownItem(title: device.name, value: .string(device.id))
+            }
+            return updated
         }
     }
-}
-
-private struct WidgetConfigurationCard: View {
-    var item: WidgetSettingsSnapshot.Item
-    @Binding var preferenceValues: [String: RuntimeJSONValue]
-    var onSavePreference: (String, RuntimeJSONValue?) -> Void
-    var accentTint: Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(item.tint.opacity(0.18))
-                    .frame(width: 34, height: 34)
-                    .overlay {
-                        Image(systemName: item.icon)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(item.tint.opacity(0.96))
-                    }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(item.title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.92))
-
-                    Text(configurationSubtitle)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.44))
-                }
-            }
-
-            if item.preferences.isEmpty {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.white.opacity(0.04))
-                    .frame(height: 84)
-                    .overlay {
-                        VStack(spacing: 6) {
-                            Image(systemName: "checkmark.circle")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.45))
-
-                            Text("This widget has no configurable preferences.")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.42))
-                        }
-                    }
+        SettingsSection(
+            title: "Configuration",
+            symbolName: "slider.horizontal.3"
+        ) {
+            if displayPreferences.isEmpty {
+                SettingsDescriptionRow(text: "This widget has no configurable preferences.")
             } else {
                 VStack(spacing: 0) {
                     ForEach(
-                        Array(item.preferences.enumerated()),
+                        Array(displayPreferences.enumerated()),
                         id: \.element.name
-                    ) { index, preference in
+                    ) { _, preference in
                         WidgetPreferenceRow(
                             preference: preference,
                             storedValue: preferenceValues[preference.name],
                             onSave: { onSavePreference(preference.name, $0) }
                         )
                         .id("\(item.id.uuidString):\(preference.name)")
-                        .overlay(alignment: .bottom) {
-                            if index < item.preferences.count - 1 {
-                                Divider()
-                                    .overlay(Color.white.opacity(0.05))
-                                    .padding(.leading, 16)
-                            }
-                        }
                     }
                 }
-                .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(.white.opacity(0.07), lineWidth: 1)
-                )
             }
         }
-        .padding(16)
-        .background(.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(.white.opacity(0.06), lineWidth: 1)
-        )
-    }
-
-    private var configurationSubtitle: String {
-        let missing = item.missingRequiredPreferenceNames(given: preferenceValues)
-        if missing.isEmpty {
-            return "Update this widget instance’s preferences."
-        }
-        return "Complete the required preferences to enable this widget."
     }
 }
 
-private struct WidgetInfoCard: View {
+private struct WidgetInfoSection: View {
     var item: WidgetSettingsSnapshot.Item
-    var accentTint: Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(item.tint.opacity(0.18))
-                    .frame(width: 34, height: 34)
-                    .overlay {
-                        Image(systemName: item.icon)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(item.tint.opacity(0.96))
-                    }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(item.title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.92))
-
-                    Text("Information about the selected widget instance.")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.44))
-                }
-            }
-
+        SettingsSection(
+            title: "Info",
+            symbolName: "info.circle"
+        ) {
             VStack(spacing: 0) {
-                InspectorRow(label: "View", value: item.viewName)
-                InspectorRow(label: "Span", value: "\(item.span) columns wide")
-                InspectorRow(label: "Start position", value: "Column \(item.startColumn + 1)")
-                InspectorRow(label: "Widget ID", value: item.widgetID)
-                InspectorRow(label: "Instance ID", value: item.id.uuidString, showsDivider: false)
+                SettingsValueRow(title: "View", value: item.viewName)
+                SettingsValueRow(title: "Span", value: "\(item.span) columns wide")
+                SettingsValueRow(title: "Start position", value: "Column \(item.startColumn + 1)")
+                SettingsValueRow(title: "Widget ID", value: item.widgetID)
+                SettingsValueRow(title: "Instance ID", value: item.id.uuidString)
             }
-            .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(.white.opacity(0.07), lineWidth: 1)
-            )
         }
-        .padding(16)
-        .background(.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(.white.opacity(0.06), lineWidth: 1)
-        )
     }
 }
 
@@ -1000,6 +858,14 @@ private struct WidgetPreferenceRow: View {
                 )
             )
         case .dropdown:
+            AnyView(
+                WidgetDropdownPreferenceRow(
+                    preference: preference,
+                    storedValue: storedValue,
+                    onSave: onSave
+                )
+            )
+        case .camera:
             AnyView(
                 WidgetDropdownPreferenceRow(
                     preference: preference,
@@ -1124,32 +990,51 @@ private struct WidgetDropdownPreferenceRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            WidgetPreferenceHeader(preference: preference)
+        Group {
+            if preference.type == .camera {
+                HStack(spacing: 12) {
+                    WidgetPreferenceHeader(preference: preference)
 
-            Picker(
-                "",
-                selection: Binding(
-                    get: { selectionKey },
-                    set: { newValue in
-                        if newValue.isEmpty {
-                            onSave(nil)
-                        } else if let option = options.first(where: { selectionString(for: $0.value) == newValue }) {
-                            onSave(option.value)
-                        }
-                    }
-                )
-            ) {
-                Text("Select…").tag("")
-                ForEach(options.indices, id: \.self) { index in
-                    Text(options[index].title).tag(selectionString(for: options[index].value))
+                    Spacer(minLength: 12)
+
+                    picker
+                        .frame(minWidth: 220, alignment: .trailing)
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    WidgetPreferenceHeader(preference: preference)
+
+                    picker
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
             }
-            .pickerStyle(.menu)
-            .labelsHidden()
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+    }
+
+    private var picker: some View {
+        Picker(
+            "",
+            selection: Binding(
+                get: { selectionKey },
+                set: { newValue in
+                    if newValue.isEmpty {
+                        onSave(nil)
+                    } else if let option = options.first(where: { selectionString(for: $0.value) == newValue }) {
+                        onSave(option.value)
+                    }
+                }
+            )
+        ) {
+            Text("Select…").tag("")
+            ForEach(options.indices, id: \.self) { index in
+                Text(options[index].title).tag(selectionString(for: options[index].value))
+            }
+        }
+        .pickerStyle(.menu)
+        .labelsHidden()
     }
 
     private func selectionString(for value: RuntimeJSONValue) -> String {
@@ -1165,12 +1050,10 @@ private struct WidgetPreferenceHeader: View {
     var titleOverride: String? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Text(titleOverride ?? preference.title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.88))
-
+        SettingsRowLabel(
+            title: titleOverride ?? preference.title,
+            subtitle: preference.description,
+            trailingContent: {
                 if preference.isRequired {
                     Text("Required")
                         .font(.system(size: 10, weight: .semibold))
@@ -1180,14 +1063,7 @@ private struct WidgetPreferenceHeader: View {
                         .background(Color(red: 1.0, green: 0.78, blue: 0.3).opacity(0.12), in: Capsule(style: .continuous))
                 }
             }
-
-            if let description = preference.description, !description.isEmpty {
-                Text(description)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.42))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
+        )
     }
 }
 
@@ -1250,7 +1126,7 @@ private struct WidgetSettingsSnapshot {
                 switch preference.type {
                 case .textfield, .password:
                     return resolvedValue?.stringValue?.isEmpty == false ? nil : preference.name
-                case .checkbox, .dropdown:
+                case .checkbox, .dropdown, .camera:
                     return resolvedValue == nil ? preference.name : nil
                 }
             }
@@ -2028,17 +1904,7 @@ private struct SettingsToggleRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.92))
-
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.42))
-                }
-            }
+            SettingsRowLabel(title: title, subtitle: subtitle)
 
             Spacer(minLength: 16)
 
@@ -2176,17 +2042,11 @@ private struct SettingsValueRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundStyle(.white.opacity(isDimmed ? 0.45 : 0.92))
-
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.42))
-                }
-            }
+            SettingsRowLabel(
+                title: title,
+                subtitle: subtitle,
+                titleOpacity: isDimmed ? 0.45 : 0.92
+            )
 
             Spacer(minLength: 16)
 
@@ -2210,15 +2070,7 @@ private struct SettingsShortcutRecorderRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.92))
-
-                Text(subtitle)
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.42))
-            }
+            SettingsRowLabel(title: title, subtitle: subtitle)
 
             Spacer(minLength: 16)
 
@@ -2262,6 +2114,44 @@ private struct SettingsShortcutRecorderRow: View {
         .onChange(of: isRecording) { _, newValue in
             if newValue {
                 recordedShortcut = ShortcutRecordingState()
+            }
+        }
+    }
+}
+
+private struct SettingsRowLabel<TrailingContent: View>: View {
+    var title: String
+    var subtitle: String? = nil
+    var titleOpacity: Double = 0.92
+    @ViewBuilder var trailingContent: TrailingContent
+
+    init(
+        title: String,
+        subtitle: String? = nil,
+        titleOpacity: Double = 0.92,
+        @ViewBuilder trailingContent: () -> TrailingContent = { EmptyView() }
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.titleOpacity = titleOpacity
+        self.trailingContent = trailingContent()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: 6) {
+                Text(title)
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(.white.opacity(titleOpacity))
+
+                trailingContent
+            }
+
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.42))
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

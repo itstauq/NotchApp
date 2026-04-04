@@ -10,6 +10,7 @@ const React = require("react");
 const OVERLAY_SLOT_TYPE = "__notch_overlay";
 const LEADING_ACCESSORY_SLOT_TYPE = "__notch_leadingAccessory";
 const TRAILING_ACCESSORY_SLOT_TYPE = "__notch_trailingAccessory";
+const MENU_LABEL_SLOT_TYPE = "__notch_menuLabel";
 
 function renderTree(element) {
   const renderer = createRenderer();
@@ -32,6 +33,10 @@ function leadingAccessorySlot(child) {
 
 function trailingAccessorySlot(child) {
   return React.createElement(TRAILING_ACCESSORY_SLOT_TYPE, null, child);
+}
+
+function menuLabelSlot(child) {
+  return React.createElement(MENU_LABEL_SLOT_TYPE, null, child);
 }
 
 async function flushEffects() {
@@ -214,6 +219,32 @@ test("reconciler serializes frame infinity sentinels and flattens fragment overl
   assert.equal(tree.props.overlay.length, 2);
   assert.equal(tree.props.overlay[0].node.type, "IconButton");
   assert.equal(tree.props.overlay[1].node.type, "Icon");
+});
+
+test("reconciler preserves menu labels and callback props", () => {
+  let menuPayload = null;
+
+  const tree = renderTree(
+    React.createElement(
+      "Menu",
+      null,
+      menuLabelSlot(React.createElement("IconButton", { symbol: "gearshape.fill" })),
+      React.createElement("Button", {
+        title: "Mirror Preview",
+        onPress: (payload) => {
+          menuPayload = payload;
+        },
+      })
+    )
+  );
+
+  assert.equal(tree.type, "Menu");
+  assert.equal(tree.props.label.type, "IconButton");
+  assert.equal(tree.children[0].type, "Button");
+  assert.match(tree.children[0].props.onPress, /^cb_/);
+
+  invokeCallback(tree.children[0].props.onPress, { source: "menu" });
+  assert.deepEqual(menuPayload, { source: "menu" });
 });
 
 test("text nodes preserve overlay slot children while keeping flattened text content", () => {

@@ -119,6 +119,7 @@ enum WidgetPreferenceType: String, Codable, Equatable {
     case password
     case checkbox
     case dropdown
+    case camera
 }
 
 struct WidgetPreferenceDropdownItem: Codable, Equatable {
@@ -181,6 +182,10 @@ struct WidgetPreferenceDefinition: Codable, Equatable, Identifiable {
             if let defaultValue,
                !data.contains(where: { $0.value == defaultValue }) {
                 throw WidgetPreferenceValidationError.invalidDefinition("Dropdown preference '\(name)' must use a default contained in data.")
+            }
+        case .camera:
+            if let defaultValue, !defaultValue.isStringLike {
+                throw WidgetPreferenceValidationError.invalidDefinition("Camera preference '\(name)' must use a string default.")
             }
         }
     }

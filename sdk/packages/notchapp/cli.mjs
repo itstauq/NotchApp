@@ -96,6 +96,7 @@ const SUPPORTED_PREFERENCE_TYPES = new Set([
   "password",
   "checkbox",
   "dropdown",
+  "camera",
 ]);
 
 function validatePreferences(preferences, manifestPath) {
@@ -144,6 +145,11 @@ function validatePreferences(preferences, manifestPath) {
         if (Object.hasOwn(preference, "default")
           && !preference.data.some((item) => JSON.stringify(item.value) === JSON.stringify(preference.default))) {
           throw new Error(`Invalid preferences in ${manifestPath}: dropdown '${preference.name}' default must appear in data`);
+        }
+        break;
+      case "camera":
+        if (Object.hasOwn(preference, "default") && typeof preference.default !== "string") {
+          throw new Error(`Invalid preferences in ${manifestPath}: camera '${preference.name}' must use a string default`);
         }
         break;
       default:

@@ -1,6 +1,8 @@
 import AppKit
 import Foundation
 
+private let cameraDevicePreferenceName = "cameraDeviceId"
+
 struct RuntimeFetchRequestParams: Decodable {
     var requestId: String
     var url: String
@@ -26,6 +28,15 @@ struct RuntimeBrowserOpenParams: Decodable {
     var url: String
 }
 
+struct RuntimeCameraSelectDeviceParams: Decodable {
+    var id: String
+}
+
+struct RuntimeSetPreferenceValueParams: Decodable {
+    var name: String
+    var value: RuntimeJSONValue?
+}
+
 struct RuntimeRPCRequestParams: Decodable {
     var instanceId: String
     var sessionId: String
@@ -45,6 +56,13 @@ protocol WidgetHostLocalStorageHandling {
         method: String,
         params: RuntimeJSONValue?
     ) throws -> RuntimeJSONValue
+
+    func setPreferenceValue(
+        widgetID: String,
+        instanceID: String,
+        name: String,
+        value: RuntimeJSONValue?
+    ) throws
 }
 
 extension WidgetStorageManager: WidgetHostLocalStorageHandling {}
@@ -593,6 +611,39 @@ final class WidgetHostAPI {
                 kind: .openURL
             )
             try network.open(openParams, context: context)
+            return .null
+        case "preferences.setValue":
+            let preferenceParams = try decode(params, as: RuntimeSetPreferenceValueParams.self)
+            try storage.setPreferenceValue(
+                widgetID: widgetID,
+                instanceID: instanceID,
+                name: preferenceParams.name,
+                value: preferenceParams.value
+            )
+            if let uuid = UUID(uuidString: instanceID) {
+                NotificationCenter.default.post(
+                    name: .widgetPreferencesDidChange,
+                    object: WidgetPreferencesDidChangePayload(instanceID: uuid)
+                )
+            }
+            return .null
+        case "camera.listDevices":
+            return try encodeRuntimeJSONValue(WidgetCameraController.shared.availableDevices())
+        case "camera.selectDevice":
+            let cameraParams = try decode(params, as: RuntimeCameraSelectDeviceParams.self)
+            try await WidgetCameraController.shared.selectDevice(id: cameraParams.id)
+            try storage.setPreferenceValue(
+                widgetID: widgetID,
+                instanceID: instanceID,
+                name: cameraDevicePreferenceName,
+                value: RuntimeJSONValue.string(cameraParams.id)
+            )
+            if let uuid = UUID(uuidString: instanceID) {
+                NotificationCenter.default.post(
+                    name: .widgetPreferencesDidChange,
+                    object: WidgetPreferencesDidChangePayload(instanceID: uuid)
+                )
+            }
             return .null
         default:
             throw RuntimeTransportRPCError(

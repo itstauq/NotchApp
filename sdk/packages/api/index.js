@@ -3,11 +3,18 @@ const { useLocalStorage } = require("./hooks/useLocalStorage");
 const { usePromise } = require("./hooks/usePromise");
 const { useFetch } = require("./hooks/useFetch");
 const { openURL } = require("./functions/openURL");
-const { LocalStorage, getPreferenceValues } = require("./runtime");
+const {
+  LocalStorage,
+  getPreferenceValues,
+  setPreferenceValue,
+  listCameras,
+  selectCamera,
+} = require("./runtime");
 
 const OVERLAY_SLOT_TYPE = "__notch_overlay";
 const LEADING_ACCESSORY_SLOT_TYPE = "__notch_leadingAccessory";
 const TRAILING_ACCESSORY_SLOT_TYPE = "__notch_trailingAccessory";
+const MENU_LABEL_SLOT_TYPE = "__notch_menuLabel";
 
 function slot(type, props, children, key) {
   return React.createElement(
@@ -53,6 +60,14 @@ function normalizeAccessoryChild(type, accessory) {
   }
 
   return [slot(type, null, accessory)];
+}
+
+function normalizeMenuLabel(label) {
+  if (label == null || label === false) {
+    return [];
+  }
+
+  return [slot(MENU_LABEL_SLOT_TYPE, null, label)];
 }
 
 function createHostElement(type, rawProps = {}) {
@@ -104,6 +119,19 @@ function Camera(props = {}) {
   return createHostElement("Camera", props);
 }
 
+function Menu(props = {}) {
+  const { children, label, ...rest } = props;
+  const hostChildren = [];
+
+  if (children !== undefined) {
+    hostChildren.push(children);
+  }
+
+  hostChildren.push(...normalizeMenuLabel(label));
+
+  return React.createElement("Menu", rest, ...hostChildren);
+}
+
 function Button(props = {}) {
   return createHostElement("Button", props);
 }
@@ -148,6 +176,7 @@ module.exports = {
   Icon,
   Image,
   Camera,
+  Menu,
   Button,
   Row,
   IconButton,
@@ -159,6 +188,9 @@ module.exports = {
   RoundedRect,
   LocalStorage,
   getPreferenceValues,
+  setPreferenceValue,
+  listCameras,
+  selectCamera,
   useLocalStorage,
   usePromise,
   useFetch,

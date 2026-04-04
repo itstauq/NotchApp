@@ -1,4 +1,18 @@
-import { Camera, Circle, Icon, RoundedRect } from "@notchapp/api";
+import {
+  Button,
+  Camera,
+  Circle,
+  Divider,
+  Icon,
+  Menu,
+  RoundedRect,
+  getPreferenceValues,
+  listCameras,
+  setPreferenceValue,
+  selectCamera,
+  usePromise,
+} from "@notchapp/api";
+import { useEffect, useState } from "react";
 
 function CameraOverlayBadge({ symbol, padding }) {
   return (
@@ -9,29 +23,61 @@ function CameraOverlayBadge({ symbol, padding }) {
       height={24}
       padding={padding}
     >
-      <Icon symbol={symbol} size={10} opacity={0.82} />
+      <Icon symbol={symbol} size={10} weight="bold" color="#FFFFFF" opacity={0.82} />
     </RoundedRect>
   );
 }
 
 export default function Widget() {
+  const preferences = getPreferenceValues();
+  const { data: cameras = [], revalidate } = usePromise(() => listCameras(), []);
+  const [mirrorPreview, setMirrorPreview] = useState(preferences.mirrorPreview ?? true);
+
+  useEffect(() => {
+    setMirrorPreview(preferences.mirrorPreview ?? true);
+  }, [preferences.mirrorPreview]);
+
   return (
     <Camera
+      mirrored={mirrorPreview}
       frame={{ maxWidth: Infinity, maxHeight: Infinity }}
       clipShape={{ type: "roundedRect", cornerRadius: 16 }}
       background="#1e232b"
       overlay={[
         {
           alignment: "topTrailing",
-          node: <CameraOverlayBadge symbol="gearshape.fill" padding={12} />,
-        },
-        {
-          alignment: "bottomTrailing",
-          node: <CameraOverlayBadge symbol="photo.badge.plus" padding={12} />,
-        },
-        {
-          alignment: "bottomLeading",
-          node: <CameraOverlayBadge symbol="waveform" padding={12} />,
+          node: (
+            <Menu label={<CameraOverlayBadge symbol="gearshape.fill" padding={12} />}>
+              {cameras.length === 0 ? (
+                <Button disabled>Loading Cameras…</Button>
+              ) : (
+                cameras.map((camera) => (
+                  <Button
+                    key={camera.id}
+                    checked={camera.selected}
+                    onPress={async () => {
+                      await selectCamera(camera.id);
+                      revalidate();
+                    }}
+                  >
+                    {camera.name}
+                  </Button>
+                ))
+              )}
+              <Divider />
+              <Button
+                checked={mirrorPreview}
+                onPress={async () => {
+                  const nextValue = !mirrorPreview;
+                  setMirrorPreview(nextValue);
+                  await setPreferenceValue("mirrorPreview", nextValue);
+                  console.info("camera menu: mirror preview", nextValue);
+                }}
+              >
+                Mirror Preview
+              </Button>
+            </Menu>
+          ),
         },
         {
           alignment: "topTrailing",

@@ -29,6 +29,15 @@ module.exports = {
 
     return structuredClone(preferences);
   },
+  setPreferenceValue(name, value) {
+    return runtime().callRpc("preferences.setValue", { name, value });
+  },
+  listCameras() {
+    return runtime().callRpc("camera.listDevices", {});
+  },
+  selectCamera(id) {
+    return runtime().callRpc("camera.selectDevice", { id });
+  },
   getCurrentProps: () => runtime().getCurrentProps(),
   callRpc: (method, params) => runtime().callRpc(method, params),
 };

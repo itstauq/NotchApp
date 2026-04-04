@@ -790,6 +790,8 @@ final class WidgetRuntimeController {
             return .checkbox
         case .dropdown:
             return .dropdown
+        case .camera:
+            return .camera
         }
     }
 
