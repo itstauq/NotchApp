@@ -9,7 +9,7 @@ https://github.com/user-attachments/assets/8f011a49-6c6f-4cc4-b100-5430d12cd2ae
 - expand the notch into a larger interactive surface
 - create multiple views and organize widgets across them
 - choose from a carefully crafted set of built-in widgets (coming soon)
-- build your own using a Raycast-inspired extensions API (coming soon)
+- build your own using a Raycast-inspired extensions API
 
 ## Planned Widgets
 
