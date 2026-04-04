@@ -100,6 +100,10 @@ function Image(props = {}) {
   return createHostElement("Image", props);
 }
 
+function Camera(props = {}) {
+  return createHostElement("Camera", props);
+}
+
 function Button(props = {}) {
   return createHostElement("Button", props);
 }
@@ -143,6 +147,7 @@ module.exports = {
   Text,
   Icon,
   Image,
+  Camera,
   Button,
   Row,
   IconButton,

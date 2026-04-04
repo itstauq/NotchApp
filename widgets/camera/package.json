@@ -1,0 +1,25 @@
+{
+  "name": "@notchapp/widget-camera-preview",
+  "version": "0.1.1",
+  "private": true,
+  "scripts": {
+    "develop": "notchapp develop",
+    "build": "notchapp build",
+    "lint": "notchapp lint"
+  },
+  "devDependencies": {
+    "notchapp": "^0.1.1"
+  },
+  "dependencies": {
+    "@notchapp/api": "^0.1.1"
+  },
+  "notch": {
+    "id": "com.notchapp.camera-preview",
+    "title": "Camera Preview",
+    "description": "Mirror preview",
+    "icon": "camera.fill",
+    "minSpan": 3,
+    "maxSpan": 9,
+    "entry": "src/index.tsx"
+  }
+}

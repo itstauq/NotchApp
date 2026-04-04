@@ -53,10 +53,11 @@ test("reconciler serializes the new component wrappers into v2 host nodes", () =
         ),
       React.createElement(
         "ScrollView",
-        { spacing: 8, fadeEdges: "both" },
+      { spacing: 8, fadeEdges: "both" },
         React.createElement("Divider", { color: "#FF0000AA" }),
         React.createElement("Circle", { size: 12, fill: "#FFFFFF" }),
-        React.createElement("RoundedRect", { width: 20, height: 10, cornerRadius: 4, fill: "#111111" })
+        React.createElement("RoundedRect", { width: 20, height: 10, cornerRadius: 4, fill: "#111111" }),
+        React.createElement("Camera", { cornerRadius: 16 })
       ),
       React.createElement("Row", null, React.createElement("Text", null, "Row")),
       React.createElement("IconButton", { symbol: "trash", size: "large" }),
@@ -77,6 +78,7 @@ test("reconciler serializes the new component wrappers into v2 host nodes", () =
   assert.equal(tree.children[1].children[0].type, "Divider");
   assert.equal(tree.children[1].children[1].type, "Circle");
   assert.equal(tree.children[1].children[2].type, "RoundedRect");
+  assert.equal(tree.children[1].children[3].type, "Camera");
 
   assert.equal(tree.children[2].type, "Row");
   assert.equal(tree.children[3].type, "IconButton");

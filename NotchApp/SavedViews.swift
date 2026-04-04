@@ -1020,7 +1020,8 @@ final class ViewManager {
         switch viewID {
         case SavedView.homeID:
             widgets = [
-                widget("com.notchapp.capture", 0, 4)
+                widget("com.notchapp.capture", 0, 5),
+                widget("com.notchapp.camera-preview", 5, 4)
             ].compactMap { $0 }
         default:
             widgets = []

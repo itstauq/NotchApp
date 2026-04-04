@@ -48,6 +48,10 @@ class NotchPanel: NSPanel {
             .first { $0.kind == .content }
     }
 
+    static var allPanels: [NotchPanel] {
+        NSApp.windows.compactMap { $0 as? NotchPanel }
+    }
+
     func setView<V: View>(_ view: V) {
         let hosting = FixedHostingView(rootView: view)
         hosting.frame = NSRect(origin: .zero, size: frame.size)

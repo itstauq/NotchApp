@@ -15,5 +15,7 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>NotchApp uses the camera to provide camera capabilities to widgets.</string>
 </dict>
 </plist>

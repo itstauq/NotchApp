@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import SwiftUI
 
 struct NotchContentView: View {
@@ -836,6 +837,10 @@ private struct RuntimeV2NodeView: View {
                     assetRootURL: assetRootURL
                 )
             )
+        case "Camera":
+            return AnyView(
+                RuntimeV2CameraNodeView(node: node)
+            )
         case "Button":
             return AnyView(
                 Button {
@@ -1112,6 +1117,12 @@ private struct RuntimeV2NodeView: View {
             view = AnyView(view.opacity(opacity))
         }
 
+        if let pointerEvents = node.string("pointerEvents") {
+            view = AnyView(view.allowsHitTesting(pointerEvents != "none"))
+        } else if let allowsHitTesting = node.bool("allowsHitTesting") {
+            view = AnyView(view.allowsHitTesting(allowsHitTesting))
+        }
+
         if let overlays = node.decoded("overlay", as: [RuntimeV2OverlayPayload].self), !overlays.isEmpty {
             for overlay in overlays {
                 view = AnyView(
@@ -1325,6 +1336,335 @@ private struct RuntimeV2NodeView: View {
                 endPoint: .bottom
             )
         }
+    }
+}
+
+@MainActor
+private final class WidgetCameraController: ObservableObject {
+    static let shared = WidgetCameraController()
+
+    enum State: Equatable {
+        case idle
+        case needsPermission
+        case requesting
+        case ready
+        case denied
+        case unavailable(String)
+    }
+
+    @Published private(set) var state: State = .idle
+    let session = AVCaptureSession()
+
+    private let sessionQueue = DispatchQueue(label: "com.notchapp.camera")
+    private var didConfigureSession = false
+    private var isStarting = false
+    private var visiblePreviewIDs: Set<UUID> = []
+    private var suspendedPanelsPendingRestore: [SuspendedNotchPanelState]?
+    private var appDidBecomeActiveObserver: NSObjectProtocol?
+
+    func previewDidAppear(_ id: UUID) {
+        visiblePreviewIDs.insert(id)
+    }
+
+    func previewDidDisappear(_ id: UUID) {
+        visiblePreviewIDs.remove(id)
+        stopSessionIfUnused()
+    }
+
+    func ensureStarted() {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            startSessionIfNeeded()
+        case .notDetermined:
+            if state == .idle {
+                state = .needsPermission
+            }
+        case .denied, .restricted:
+            state = .denied
+        @unknown default:
+            state = .unavailable("Camera unavailable.")
+        }
+    }
+
+    private func stopSessionIfUnused() {
+        guard visiblePreviewIDs.isEmpty else { return }
+        sessionQueue.async {
+            if self.session.isRunning {
+                self.session.stopRunning()
+            }
+        }
+    }
+
+    func requestPermission() {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            startSessionIfNeeded()
+        case .notDetermined:
+            guard state != .requesting else { return }
+            state = .requesting
+            let suspendedPanels = suspendNotchPanels()
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                Task { @MainActor in
+                    defer { self.restoreNotchPanels(suspendedPanels) }
+                    if granted {
+                        self.startSessionIfNeeded()
+                    } else {
+                        self.state = .denied
+                    }
+                }
+            }
+        case .denied, .restricted:
+            state = .denied
+            let suspendedPanels = suspendNotchPanels()
+            rememberPanelsForRestore(suspendedPanels)
+            if let settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera") {
+                NSWorkspace.shared.open(settingsURL)
+            }
+        @unknown default:
+            state = .unavailable("Camera unavailable.")
+        }
+    }
+
+    private func startSessionIfNeeded() {
+        guard !isStarting else { return }
+        isStarting = true
+
+        sessionQueue.async {
+            defer {
+                Task { @MainActor in
+                    self.isStarting = false
+                }
+            }
+
+            do {
+                try self.configureSessionIfNeeded()
+                if !self.session.isRunning {
+                    self.session.startRunning()
+                }
+                Task { @MainActor in
+                    self.state = .ready
+                }
+            } catch {
+                Task { @MainActor in
+                    self.state = .unavailable(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func configureSessionIfNeeded() throws {
+        guard !didConfigureSession else { return }
+
+        session.beginConfiguration()
+        defer {
+            session.commitConfiguration()
+        }
+
+        session.sessionPreset = .high
+
+        let device =
+            AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
+            ?? AVCaptureDevice.default(for: .video)
+
+        guard let device else {
+            throw NSError(
+                domain: "NotchCamera",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "No camera is available on this Mac."]
+            )
+        }
+
+        let input = try AVCaptureDeviceInput(device: device)
+        guard session.canAddInput(input) else {
+            throw NSError(
+                domain: "NotchCamera",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Unable to access the camera input."]
+            )
+        }
+
+        session.addInput(input)
+        didConfigureSession = true
+    }
+}
+
+private struct RuntimeV2CameraNodeView: View {
+    var node: RenderNodeV2
+    @StateObject private var controller = WidgetCameraController.shared
+    @State private var previewID = UUID()
+
+    var body: some View {
+        Group {
+            switch controller.state {
+            case .ready:
+                RuntimeV2CameraSessionView(session: controller.session)
+            case .needsPermission:
+                permissionPrompt
+            case .denied:
+                permissionPrompt(title: "Camera Access Needed", buttonLabel: "Open Settings")
+            case .unavailable:
+                fallback(symbol: "camera.metering.unknown", title: "Camera Unavailable")
+            case .requesting:
+                fallback(symbol: "camera.fill", title: "Requesting Camera Access")
+            case .idle:
+                Color.clear
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            controller.previewDidAppear(previewID)
+            controller.ensureStarted()
+        }
+        .onDisappear {
+            controller.previewDidDisappear(previewID)
+        }
+    }
+
+    private var permissionPrompt: some View {
+        permissionPrompt(title: "Camera Access", buttonLabel: "Enable")
+    }
+
+    private func permissionPrompt(title: String, buttonLabel: String) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: "camera.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.78))
+
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.82))
+
+            Button {
+                controller.requestPermission()
+            } label: {
+                Text(buttonLabel)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.95))
+                    .frame(minWidth: 96)
+                    .frame(height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.white.opacity(0.14))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func fallback(symbol: String, title: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.72))
+
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.72))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.clear)
+    }
+}
+
+private struct SuspendedNotchPanelState {
+    weak var panel: NotchPanel?
+    let alphaValue: CGFloat
+    let wasVisible: Bool
+}
+
+@MainActor
+private extension WidgetCameraController {
+    func suspendNotchPanels() -> [SuspendedNotchPanelState] {
+        let suspended = NotchPanel.allPanels.map { panel in
+            SuspendedNotchPanelState(panel: panel, alphaValue: panel.alphaValue, wasVisible: panel.isVisible)
+        }
+
+        for panel in NotchPanel.allPanels {
+            panel.orderOut(nil)
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        return suspended
+    }
+
+    func restoreNotchPanels(_ suspended: [SuspendedNotchPanelState]) {
+        for snapshot in suspended {
+            guard let panel = snapshot.panel else { continue }
+            panel.alphaValue = snapshot.alphaValue
+            if snapshot.wasVisible {
+                panel.orderFrontRegardless()
+            }
+        }
+    }
+
+    func rememberPanelsForRestore(_ suspended: [SuspendedNotchPanelState]) {
+        suspendedPanelsPendingRestore = suspended
+
+        if let appDidBecomeActiveObserver {
+            NotificationCenter.default.removeObserver(appDidBecomeActiveObserver)
+        }
+
+        appDidBecomeActiveObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: NSApp,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, let suspended = self.suspendedPanelsPendingRestore else { return }
+            self.restoreNotchPanels(suspended)
+            self.suspendedPanelsPendingRestore = nil
+            if let observer = self.appDidBecomeActiveObserver {
+                NotificationCenter.default.removeObserver(observer)
+                self.appDidBecomeActiveObserver = nil
+            }
+        }
+    }
+}
+
+private struct RuntimeV2CameraSessionView: NSViewRepresentable {
+    var session: AVCaptureSession
+
+    func makeNSView(context: Context) -> RuntimeV2CameraNSView {
+        let view = RuntimeV2CameraNSView()
+        view.layer?.backgroundColor = NSColor.clear.cgColor
+        view.previewLayer.session = session
+        return view
+    }
+
+    func updateNSView(_ nsView: RuntimeV2CameraNSView, context: Context) {
+        if nsView.previewLayer.session !== session {
+            nsView.previewLayer.session = session
+        }
+    }
+}
+
+private final class RuntimeV2CameraNSView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func makeBackingLayer() -> CALayer {
+        AVCaptureVideoPreviewLayer()
+    }
+
+    var previewLayer: AVCaptureVideoPreviewLayer {
+        layer as! AVCaptureVideoPreviewLayer
+    }
+
+    override func layout() {
+        super.layout()
+        previewLayer.frame = bounds
+        previewLayer.videoGravity = .resizeAspectFill
     }
 }
 
