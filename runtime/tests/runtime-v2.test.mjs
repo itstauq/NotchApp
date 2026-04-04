@@ -219,3 +219,65 @@ test("runtime-v2 forwards updateProps to mounted workers and rerenders with the 
   );
   assert.equal(updatedRender.params.data.props.text, "3");
 });
+
+test("runtime-v2 exposes resolved preferences through getPreferenceValues", async (t) => {
+  const dir = createTempDir(t, "notch-runtime-v2-preferences-");
+  const bundlePath = path.join(dir, "bundle.cjs");
+
+  fs.writeFileSync(
+    bundlePath,
+    [
+      'const React = require("react");',
+      'const { getPreferenceValues } = require("@notchapp/api");',
+      "module.exports.default = function Widget() {",
+      "  const preferences = getPreferenceValues();",
+      '  return React.createElement("Text", null, String(preferences.mailbox ?? "missing"));',
+      "};",
+      "",
+    ].join("\n")
+  );
+
+  const runtime = createRuntimeHarness(t);
+  const instanceId = "instance-preferences-1";
+
+  runtime.send({
+    jsonrpc: "2.0",
+    id: "mount-preferences-1",
+    method: "mount",
+    params: {
+      widgetId: "test.widget",
+      instanceId,
+      bundlePath,
+      props: {
+        environment: {
+          widgetId: "test.widget",
+          instanceId,
+          viewId: "view-1",
+          span: 1,
+          hostColumnCount: 4,
+          isEditing: false,
+          isDevelopment: false,
+        },
+        preferences: {
+          mailbox: "inbox",
+        },
+      },
+    },
+  });
+
+  const mountResponse = await runtime.waitFor(
+    (message) => message.id === "mount-preferences-1",
+    "the preferences mount response"
+  );
+  const sessionId = mountResponse.result?.sessionId;
+  assert.equal(typeof sessionId, "string");
+
+  const render = await runtime.waitFor(
+    (message) => message.method === "render"
+      && message.params?.sessionId === sessionId
+      && message.params?.kind === "full",
+    "the preferences render"
+  );
+
+  assert.equal(render.params.data?.props?.text, "inbox");
+});

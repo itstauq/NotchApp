@@ -51,6 +51,7 @@ struct WidgetDefinition: Identifiable, Codable, Equatable {
     var maxSpan: Int
     var package: WidgetPackage
     var entryFilePath: String?
+    var preferences: [WidgetPreferenceDefinition]
 
     var caption: String {
         description ?? "Widget"
@@ -107,8 +108,94 @@ struct WidgetDefinition: Identifiable, Codable, Equatable {
                 directoryPath: RepoPaths.installedWidgetsRoot.path,
                 manifestPath: RepoPaths.installedWidgetsRoot.appendingPathComponent("package.json").path
             ),
-            entryFilePath: nil
+            entryFilePath: nil,
+            preferences: []
         )
+    }
+}
+
+enum WidgetPreferenceType: String, Codable, Equatable {
+    case textfield
+    case password
+    case checkbox
+    case dropdown
+}
+
+struct WidgetPreferenceDropdownItem: Codable, Equatable {
+    var title: String
+    var value: RuntimeJSONValue
+}
+
+struct WidgetPreferenceDefinition: Codable, Equatable, Identifiable {
+    var name: String
+    var title: String
+    var description: String?
+    var type: WidgetPreferenceType
+    var required: Bool?
+    var placeholder: String?
+    var defaultValue: RuntimeJSONValue?
+    var label: String?
+    var data: [WidgetPreferenceDropdownItem]?
+
+    var id: String { name }
+
+    var isRequired: Bool {
+        required == true
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case title
+        case description
+        case type
+        case required
+        case placeholder
+        case defaultValue = "default"
+        case label
+        case data
+    }
+
+    func validate() throws {
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw WidgetPreferenceValidationError.invalidDefinition("Preference entries must include non-empty name/title.")
+        }
+
+        switch type {
+        case .textfield, .password:
+            if let defaultValue, !defaultValue.isStringLike {
+                throw WidgetPreferenceValidationError.invalidDefinition("Preference '\(name)' must use a string default.")
+            }
+        case .checkbox:
+            if let defaultValue, !defaultValue.isBoolLike {
+                throw WidgetPreferenceValidationError.invalidDefinition("Preference '\(name)' must use a boolean default.")
+            }
+        case .dropdown:
+            guard let data, !data.isEmpty else {
+                throw WidgetPreferenceValidationError.invalidDefinition("Dropdown preference '\(name)' must include data.")
+            }
+            let titles = data.map(\.title)
+            guard titles.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+                throw WidgetPreferenceValidationError.invalidDefinition("Dropdown preference '\(name)' contains an empty title.")
+            }
+            if let defaultValue,
+               !data.contains(where: { $0.value == defaultValue }) {
+                throw WidgetPreferenceValidationError.invalidDefinition("Dropdown preference '\(name)' must use a default contained in data.")
+            }
+        }
+    }
+}
+
+enum WidgetPreferenceValidationError: Error {
+    case invalidDefinition(String)
+}
+
+extension WidgetPreferenceValidationError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .invalidDefinition(let message):
+            return message
+        }
     }
 }
 
@@ -121,6 +208,7 @@ struct WidgetManifest: Codable {
         var maxSpan: Int
         var description: String?
         var entry: String?
+        var preferences: [WidgetPreferenceDefinition]?
     }
 
     var name: String
@@ -166,6 +254,17 @@ enum WidgetCatalog {
                     continue
                 }
 
+                let preferences = notch.preferences ?? []
+                do {
+                    try validatePreferences(preferences)
+                } catch let error as WidgetPreferenceValidationError {
+                    log.write("Widget catalog: invalid preferences for \(notch.id): \(error.localizedDescription)")
+                    continue
+                } catch {
+                    log.write("Widget catalog: invalid preferences for \(notch.id): \(error.localizedDescription)")
+                    continue
+                }
+
                 let sourcePackageURL = packageURL.resolvingSymlinksInPath().standardizedFileURL
                 let package = WidgetPackage(
                     id: manifest.name,
@@ -188,7 +287,8 @@ enum WidgetCatalog {
                     minSpan: notch.minSpan,
                     maxSpan: notch.maxSpan,
                     package: package,
-                    entryFilePath: entryURL.path
+                    entryFilePath: entryURL.path,
+                    preferences: preferences
                 )
 
                 definitions.append(definition)
@@ -198,6 +298,16 @@ enum WidgetCatalog {
         }
 
         return definitions
+    }
+
+    private static func validatePreferences(_ preferences: [WidgetPreferenceDefinition]) throws {
+        var seen = Set<String>()
+        for preference in preferences {
+            try preference.validate()
+            guard seen.insert(preference.name).inserted else {
+                throw WidgetPreferenceValidationError.invalidDefinition("Duplicate preference name '\(preference.name)'.")
+            }
+        }
     }
 }
 

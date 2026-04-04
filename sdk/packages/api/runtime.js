@@ -21,6 +21,14 @@ module.exports = {
       return runtime().localStorage.allItems();
     },
   },
+  getPreferenceValues() {
+    const preferences = runtime().getCurrentProps()?.preferences;
+    if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) {
+      return {};
+    }
+
+    return structuredClone(preferences);
+  },
   getCurrentProps: () => runtime().getCurrentProps(),
   callRpc: (method, params) => runtime().callRpc(method, params),
 };

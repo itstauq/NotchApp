@@ -46,10 +46,22 @@ Current exports:
 - `Circle`
 - `RoundedRect`
 - `LocalStorage`
+- `getPreferenceValues`
 - `useLocalStorage`
 - `usePromise`
 - `useFetch`
 - `openURL`
+
+Widget preferences can be declared in your widget manifest under `notch.preferences` and read at runtime:
+
+```tsx
+import { getPreferenceValues } from "@notchapp/api";
+
+export default function Widget() {
+  const preferences = getPreferenceValues();
+  return <Text>{preferences.mailbox ?? "Inbox"}</Text>;
+}
+```
 
 The SDK source and examples live in the main repository:
 

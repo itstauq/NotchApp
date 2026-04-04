@@ -114,7 +114,9 @@ struct NotchContentView: View {
                         }
 
                         HeaderAccessoryButton(activeSymbol: "gearshape.fill") {
-                            vm.collapse()
+                            if !vm.isViewPinned {
+                                vm.collapse()
+                            }
                             AppSettingsWindow.open()
                         }
                     }
@@ -605,10 +607,17 @@ private struct RuntimeWidgetSurface: View {
     var definition: WidgetDefinition
     var vm: NotchViewModel
     var tint: Color
+    @State private var preferenceRevision = 0
+
+    private var missingRequiredPreferences: [String] {
+        vm.widgetRuntime.missingRequiredPreferenceNames(for: definition, instanceID: widget.id)
+    }
 
     var body: some View {
         Group {
-            if let error = vm.widgetRuntime.error(for: widget.id) {
+            if !missingRequiredPreferences.isEmpty {
+                configurationRequiredSurface
+            } else if let error = vm.widgetRuntime.error(for: widget.id) {
                 runtimeErrorSurface(message: error)
             } else if let tree = vm.widgetRuntime.renderTree(for: widget.id) {
                 RuntimeV2NodeView(
@@ -623,8 +632,12 @@ private struct RuntimeWidgetSurface: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .task(id: "\(widget.id.uuidString)-\(widget.span)-\(vm.isEditingLayout)-\(vm.viewManager.selectedViewID.uuidString)") {
-            if vm.widgetRuntime.isMounted(instanceID: widget.id) {
+        .task(id: "\(widget.id.uuidString)-\(widget.span)-\(vm.isEditingLayout)-\(vm.viewManager.selectedViewID.uuidString)-\(preferenceRevision)") {
+            if !missingRequiredPreferences.isEmpty {
+                if vm.widgetRuntime.isMounted(instanceID: widget.id) {
+                    vm.widgetRuntime.unmount(instanceID: widget.id)
+                }
+            } else if vm.widgetRuntime.isMounted(instanceID: widget.id) {
                 vm.widgetRuntime.update(
                     instanceID: widget.id,
                     viewID: vm.viewManager.selectedViewID,
@@ -640,6 +653,11 @@ private struct RuntimeWidgetSurface: View {
                     isEditing: vm.isEditingLayout
                 )
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .widgetPreferencesDidChange)) { notification in
+            guard let payload = notification.object as? WidgetPreferencesDidChangePayload,
+                  payload.instanceID == widget.id else { return }
+            preferenceRevision += 1
         }
     }
 
@@ -677,6 +695,53 @@ private struct RuntimeWidgetSurface: View {
                 .lineLimit(4)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private var configurationRequiredSurface: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(red: 1.0, green: 0.78, blue: 0.3).opacity(0.14))
+                .frame(height: 40)
+                .overlay(alignment: .leading) {
+                    Label("Configuration Required", systemImage: "slider.horizontal.3")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color(red: 1.0, green: 0.86, blue: 0.55))
+                        .padding(.horizontal, 12)
+                }
+
+            Text(configurationRequiredMessage)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.58))
+                .lineLimit(4)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                if !vm.isViewPinned {
+                    vm.collapse()
+                }
+                AppSettingsWindow.open(tab: .widgets, widgetInstanceID: widget.id)
+            } label: {
+                Text("Open Widget Settings")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.95))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.white.opacity(0.14))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var configurationRequiredMessage: String {
+        let missing = missingRequiredPreferences.joined(separator: ", ")
+        return "Complete the required preferences for this widget before it can render. Missing: \(missing)"
     }
 
     private var runtimeErrorTitle: String {

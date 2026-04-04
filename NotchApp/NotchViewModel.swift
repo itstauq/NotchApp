@@ -226,6 +226,7 @@ private struct RuntimeMountParams: Encodable {
 
 private struct RuntimeMountProps: Encodable {
     var environment: RuntimeEnvironmentPayload
+    var preferences: [String: RuntimeJSONValue]
 }
 
 private struct RuntimeUpdatePropsParams: Encodable {
@@ -278,6 +279,14 @@ private struct RuntimeLogNotificationParams: Decodable {
     var instanceId: String?
     var level: String?
     var message: String?
+}
+
+struct WidgetPreferencesDidChangePayload {
+    var instanceID: UUID
+}
+
+extension Notification.Name {
+    static let widgetPreferencesDidChange = Notification.Name("widgetPreferencesDidChange")
 }
 
 @MainActor
@@ -337,6 +346,34 @@ final class WidgetRuntimeController {
 
     func flushStorageWrites() {
         storageManager.flushPendingWrites()
+    }
+
+    func resolvedPreferences(for instanceID: UUID) -> [String: RuntimeJSONValue] {
+        guard let mounted = mountedWidgets[instanceID] else { return [:] }
+        return storageManager.resolvedPreferenceValues(
+            widgetID: mounted.definition.id,
+            preferences: storagePreferenceDefinitions(from: mounted.definition.preferences),
+            instanceID: instanceID.uuidString
+        )
+    }
+
+    func missingRequiredPreferenceNames(for instanceID: UUID) -> [String] {
+        guard let mounted = mountedWidgets[instanceID] else { return [] }
+        return missingRequiredPreferenceNames(for: mounted.definition, instanceID: instanceID)
+    }
+
+    func missingRequiredPreferenceNames(for definition: WidgetDefinition, instanceID: UUID) -> [String] {
+        return storageManager.missingRequiredPreferenceNames(
+            widgetID: definition.id,
+            preferences: storagePreferenceDefinitions(from: definition.preferences),
+            instanceID: instanceID.uuidString
+        )
+    }
+
+    func preferencesDidChange(instanceID: UUID) {
+        Task {
+            await syncMountedWorkerProps(instanceID)
+        }
     }
 
     func mount(widget definition: WidgetDefinition, instanceID: UUID, viewID: UUID, span: Int, isEditing: Bool) {
@@ -522,7 +559,7 @@ final class WidgetRuntimeController {
                 params: RuntimeUpdatePropsParams(
                     instanceId: instanceID.uuidString,
                     sessionId: sessionID,
-                    props: RuntimeMountProps(environment: mounted.environment)
+                    props: mountProps(for: mounted)
                 ),
                 configuration: try processConfiguration()
             )
@@ -559,7 +596,7 @@ final class WidgetRuntimeController {
                     widgetId: mounted.definition.id,
                     instanceId: instanceID.uuidString,
                     bundlePath: mounted.definition.bundleFileURL.path,
-                    props: RuntimeMountProps(environment: mounted.environment)
+                    props: mountProps(for: mounted)
                 )
             )
             let result = try decode(response, as: RuntimeMountResult.self)
@@ -582,9 +619,7 @@ final class WidgetRuntimeController {
             errorByInstance.removeValue(forKey: instanceID)
             isAvailable = true
 
-            if mountedWidgets[instanceID]?.environment != mounted.environment {
-                await syncMountedWorkerProps(instanceID)
-            }
+            await syncMountedWorkerProps(instanceID)
         } catch {
             sessionManager.remove(instanceID: instanceID)
             renderTreeByInstance.removeValue(forKey: instanceID)
@@ -721,6 +756,41 @@ final class WidgetRuntimeController {
             arguments: ["v2"],
             currentDirectoryURL: RepoPaths.developmentWidgetRuntimeRoot
         )
+    }
+
+    private func mountProps(for mounted: RuntimeMountedWidget) -> RuntimeMountProps {
+        RuntimeMountProps(
+            environment: mounted.environment,
+            preferences: storageManager.resolvedPreferenceValues(
+                widgetID: mounted.definition.id,
+                preferences: storagePreferenceDefinitions(from: mounted.definition.preferences),
+                instanceID: mounted.instanceID.uuidString
+            )
+        )
+    }
+
+    private func storagePreferenceDefinitions(from preferences: [WidgetPreferenceDefinition]) -> [WidgetStoragePreferenceDefinition] {
+        preferences.map {
+            WidgetStoragePreferenceDefinition(
+                name: $0.name,
+                kind: storagePreferenceKind(for: $0.type),
+                isRequired: $0.isRequired,
+                defaultValue: $0.defaultValue
+            )
+        }
+    }
+
+    private func storagePreferenceKind(for type: WidgetPreferenceType) -> WidgetStoragePreferenceKind {
+        switch type {
+        case .textfield:
+            return .text
+        case .password:
+            return .password
+        case .checkbox:
+            return .checkbox
+        case .dropdown:
+            return .dropdown
+        }
     }
 
     private func handleProcessTermination(description: String) {

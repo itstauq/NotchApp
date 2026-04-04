@@ -44,7 +44,7 @@ function loadAPI() {
         case "./functions/openURL":
           return { openURL() {} };
         case "./runtime":
-          return { LocalStorage: {} };
+          return { LocalStorage: {}, getPreferenceValues() { return { mailbox: "inbox" }; } };
         default:
           throw new Error(`Unexpected dependency: ${specifier}`);
       }
@@ -74,9 +74,15 @@ test("@notchapp/api exports the extended non-image component surface", () => {
     "Divider",
     "Circle",
     "RoundedRect",
+    "getPreferenceValues",
   ]) {
     assert.equal(typeof api[name], "function", `${name} should be exported`);
   }
+});
+
+test("@notchapp/api exports getPreferenceValues from the runtime bridge", () => {
+  const api = loadAPI();
+  assert.deepEqual(api.getPreferenceValues(), { mailbox: "inbox" });
 });
 
 test("component wrappers emit host elements with the expected props", () => {

@@ -3,7 +3,7 @@ const { useLocalStorage } = require("./hooks/useLocalStorage");
 const { usePromise } = require("./hooks/usePromise");
 const { useFetch } = require("./hooks/useFetch");
 const { openURL } = require("./functions/openURL");
-const { LocalStorage } = require("./runtime");
+const { LocalStorage, getPreferenceValues } = require("./runtime");
 
 const OVERLAY_SLOT_TYPE = "__notch_overlay";
 const LEADING_ACCESSORY_SLOT_TYPE = "__notch_leadingAccessory";
@@ -153,6 +153,7 @@ module.exports = {
   Circle,
   RoundedRect,
   LocalStorage,
+  getPreferenceValues,
   useLocalStorage,
   usePromise,
   useFetch,

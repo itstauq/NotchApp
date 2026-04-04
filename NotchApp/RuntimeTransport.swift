@@ -49,6 +49,30 @@ enum RuntimeJSONValue: Codable, Equatable {
         let data = try JSONEncoder().encode(self)
         return try decoder.decode(Result.self, from: data)
     }
+
+    var isStringLike: Bool {
+        if case .string = self {
+            return true
+        }
+        return false
+    }
+
+    var isBoolLike: Bool {
+        if case .bool = self {
+            return true
+        }
+        return false
+    }
+
+    var stringValue: String? {
+        guard case .string(let value) = self else { return nil }
+        return value
+    }
+
+    var boolValue: Bool? {
+        guard case .bool(let value) = self else { return nil }
+        return value
+    }
 }
 
 struct RuntimeTransportProcessConfiguration {

@@ -81,12 +81,75 @@ function readManifest(targetPackageDir) {
     throw new Error(`Invalid span range in ${manifestPath}`);
   }
 
+  validatePreferences(notch.preferences ?? [], manifestPath);
+
   const entryFile = path.join(targetPackageDir, notch.entry ?? "src/index.tsx");
   if (!fs.existsSync(entryFile)) {
     throw new Error(`Missing widget entry file at ${entryFile}`);
   }
 
   return { manifest, manifestPath, entryFile };
+}
+
+const SUPPORTED_PREFERENCE_TYPES = new Set([
+  "textfield",
+  "password",
+  "checkbox",
+  "dropdown",
+]);
+
+function validatePreferences(preferences, manifestPath) {
+  if (!Array.isArray(preferences)) {
+    throw new Error(`Invalid preferences in ${manifestPath}: preferences must be an array`);
+  }
+
+  const seen = new Set();
+  for (const preference of preferences) {
+    if (!preference || typeof preference !== "object" || Array.isArray(preference)) {
+      throw new Error(`Invalid preferences in ${manifestPath}: each preference must be an object`);
+    }
+
+    if (!preference.name || !preference.title || !preference.type) {
+      throw new Error(`Invalid preferences in ${manifestPath}: each preference must include name/title/type`);
+    }
+
+    if (seen.has(preference.name)) {
+      throw new Error(`Invalid preferences in ${manifestPath}: duplicate preference name '${preference.name}'`);
+    }
+    seen.add(preference.name);
+
+    if (!SUPPORTED_PREFERENCE_TYPES.has(preference.type)) {
+      throw new Error(`Invalid preferences in ${manifestPath}: unsupported preference type '${preference.type}'`);
+    }
+
+    switch (preference.type) {
+      case "textfield":
+      case "password":
+        if (Object.hasOwn(preference, "default") && typeof preference.default !== "string") {
+          throw new Error(`Invalid preferences in ${manifestPath}: '${preference.name}' must use a string default`);
+        }
+        break;
+      case "checkbox":
+        if (Object.hasOwn(preference, "default") && typeof preference.default !== "boolean") {
+          throw new Error(`Invalid preferences in ${manifestPath}: '${preference.name}' must use a boolean default`);
+        }
+        break;
+      case "dropdown":
+        if (!Array.isArray(preference.data) || preference.data.length === 0) {
+          throw new Error(`Invalid preferences in ${manifestPath}: dropdown '${preference.name}' must include data`);
+        }
+        if (preference.data.some((item) => !item?.title || !Object.hasOwn(item, "value"))) {
+          throw new Error(`Invalid preferences in ${manifestPath}: dropdown '${preference.name}' entries must include title/value`);
+        }
+        if (Object.hasOwn(preference, "default")
+          && !preference.data.some((item) => JSON.stringify(item.value) === JSON.stringify(preference.default))) {
+          throw new Error(`Invalid preferences in ${manifestPath}: dropdown '${preference.name}' default must appear in data`);
+        }
+        break;
+      default:
+        break;
+    }
+  }
 }
 
 function ensureCanonicalSymlink(targetPackageDir, manifest) {

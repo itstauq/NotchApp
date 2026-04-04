@@ -12,14 +12,20 @@ private let appSettingsBackgroundColor = NSColor(
 
 enum AppSettingsWindow {
     @MainActor
-    static func open(tab: AppSettingsTab = .general) {
-        AppSettingsWindowController.shared.show(tab: tab)
+    static func open(tab: AppSettingsTab = .general, widgetInstanceID: UUID? = nil) {
+        AppSettingsWindowController.shared.show(tab: tab, widgetInstanceID: widgetInstanceID)
+    }
+
+    @MainActor
+    static func consumeRequestedWidgetInstanceID() -> UUID? {
+        AppSettingsWindowController.shared.consumeRequestedWidgetInstanceID()
     }
 }
 
 @MainActor
 private final class AppSettingsWindowController: NSWindowController, NSWindowDelegate {
     static let shared = AppSettingsWindowController()
+    private var requestedWidgetInstanceID: UUID?
 
     private let titleLabel: NSTextField = {
         let label = NSTextField(labelWithString: "NotchApp Settings")
@@ -65,13 +71,21 @@ private final class AppSettingsWindowController: NSWindowController, NSWindowDel
         fatalError("init(coder:) has not been implemented")
     }
 
-    func show(tab: AppSettingsTab) {
+    func show(tab: AppSettingsTab, widgetInstanceID: UUID? = nil) {
         guard let window else { return }
+        if let widgetInstanceID {
+            requestedWidgetInstanceID = widgetInstanceID
+        }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         NotificationCenter.default.post(name: .appSettingsTabSelectionDidChange, object: tab)
         showWindow(nil)
         window.makeKeyAndOrderFront(nil)
+    }
+
+    func consumeRequestedWidgetInstanceID() -> UUID? {
+        defer { requestedWidgetInstanceID = nil }
+        return requestedWidgetInstanceID
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -352,10 +366,12 @@ private enum WidgetDetailsTab: String, CaseIterable, Identifiable {
 private struct WidgetsSettingsPage: View {
     var accentColor: AppAccentColor
 
+    private let preferenceStore = WidgetStorageManager(log: { _ in })
     @State private var snapshot = WidgetSettingsSnapshot.empty
     @State private var selectedViewID: UUID?
     @State private var selectedWidgetID: UUID?
     @State private var detailTab: WidgetDetailsTab = .configuration
+    @State private var selectedPreferenceValues: [String: RuntimeJSONValue] = [:]
 
     private var selectedView: WidgetSettingsSnapshot.ViewSection? {
         guard let selectedViewID else { return snapshot.views.first }
@@ -390,6 +406,7 @@ private struct WidgetsSettingsPage: View {
                             get: { selectedWidgetID },
                             set: { newValue in
                                 selectedWidgetID = newValue
+                                loadSelectedPreferenceValues()
                             }
                         ),
                         accentTint: accentColor.color
@@ -404,6 +421,8 @@ private struct WidgetsSettingsPage: View {
                         WidgetsDetailPanel(
                             item: selectedItem,
                             selectedTab: detailTab,
+                            preferenceValues: $selectedPreferenceValues,
+                            onSavePreference: savePreferenceValue,
                             accentTint: accentColor.color
                         )
                     }
@@ -418,9 +437,16 @@ private struct WidgetsSettingsPage: View {
         .scrollIndicators(.never)
         .task {
             loadSnapshot()
+            applyPendingWidgetSelectionIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: .savedViewsStateDidChange)) { _ in
             loadSnapshot()
+            applyPendingWidgetSelectionIfNeeded()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .widgetPreferencesDidChange)) { notification in
+            guard let payload = notification.object as? WidgetPreferencesDidChangePayload,
+                  payload.instanceID == selectedWidgetID else { return }
+            loadSelectedPreferenceValues()
         }
     }
 
@@ -446,6 +472,7 @@ private struct WidgetsSettingsPage: View {
         } else {
             selectedWidgetID = initialView?.items.first?.id
         }
+        loadSelectedPreferenceValues()
     }
 
     private func selectView(id: UUID) {
@@ -453,9 +480,64 @@ private struct WidgetsSettingsPage: View {
         selectedViewID = id
         if let selectedWidgetID,
            view.items.contains(where: { $0.id == selectedWidgetID }) {
+            loadSelectedPreferenceValues()
             return
         }
         self.selectedWidgetID = view.items.first?.id
+        loadSelectedPreferenceValues()
+    }
+
+    private func selectWidget(instanceID: UUID) {
+        guard let item = snapshot.item(with: instanceID) else {
+            loadSnapshot()
+            guard let reloadedItem = snapshot.item(with: instanceID) else { return }
+            selectedViewID = reloadedItem.viewID
+            selectedWidgetID = reloadedItem.id
+            loadSelectedPreferenceValues()
+            return
+        }
+
+        selectedViewID = item.viewID
+        selectedWidgetID = item.id
+        loadSelectedPreferenceValues()
+    }
+
+    private func loadSelectedPreferenceValues() {
+        guard let selectedItem else {
+            selectedPreferenceValues = [:]
+            return
+        }
+        selectedPreferenceValues = preferenceStore.preferenceValues(
+            widgetID: selectedItem.widgetID,
+            instanceID: selectedItem.id.uuidString
+        )
+    }
+
+    private func savePreferenceValue(name: String, value: RuntimeJSONValue?) {
+        guard let selectedItem else { return }
+
+        do {
+            try preferenceStore.setPreferenceValue(
+                widgetID: selectedItem.widgetID,
+                instanceID: selectedItem.id.uuidString,
+                name: name,
+                value: value
+            )
+            loadSelectedPreferenceValues()
+            NotificationCenter.default.post(
+                name: .widgetPreferencesDidChange,
+                object: WidgetPreferencesDidChangePayload(instanceID: selectedItem.id)
+            )
+        } catch {
+            // Keep the UI responsive for now; the field will simply revert on the next reload.
+            loadSelectedPreferenceValues()
+        }
+    }
+
+    @MainActor
+    private func applyPendingWidgetSelectionIfNeeded() {
+        guard let instanceID = AppSettingsWindow.consumeRequestedWidgetInstanceID() else { return }
+        selectWidget(instanceID: instanceID)
     }
 }
 
@@ -721,13 +803,20 @@ private struct WidgetSelectionPreviewCard: View {
 private struct WidgetsDetailPanel: View {
     var item: WidgetSettingsSnapshot.Item
     var selectedTab: WidgetDetailsTab
+    @Binding var preferenceValues: [String: RuntimeJSONValue]
+    var onSavePreference: (String, RuntimeJSONValue?) -> Void
     var accentTint: Color
 
     var body: some View {
         Group {
             switch selectedTab {
             case .configuration:
-                WidgetConfigurationPlaceholder(item: item, accentTint: accentTint)
+                WidgetConfigurationCard(
+                    item: item,
+                    preferenceValues: $preferenceValues,
+                    onSavePreference: onSavePreference,
+                    accentTint: accentTint
+                )
             case .info:
                 WidgetInfoCard(item: item, accentTint: accentTint)
             }
@@ -735,8 +824,10 @@ private struct WidgetsDetailPanel: View {
     }
 }
 
-private struct WidgetConfigurationPlaceholder: View {
+private struct WidgetConfigurationCard: View {
     var item: WidgetSettingsSnapshot.Item
+    @Binding var preferenceValues: [String: RuntimeJSONValue]
+    var onSavePreference: (String, RuntimeJSONValue?) -> Void
     var accentTint: Color
 
     var body: some View {
@@ -756,37 +847,53 @@ private struct WidgetConfigurationPlaceholder: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.92))
 
-                    Text("Widget-specific preferences will appear here.")
+                    Text(configurationSubtitle)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.white.opacity(0.44))
                 }
             }
 
-            VStack(spacing: 10) {
+            if item.preferences.isEmpty {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.white.opacity(0.045))
-                    .frame(height: 44)
-                    .overlay(alignment: .leading) {
-                        Text("Preference controls coming soon")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.62))
-                            .padding(.horizontal, 14)
-                    }
-
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.white.opacity(0.035))
+                    .fill(.white.opacity(0.04))
                     .frame(height: 84)
                     .overlay {
                         VStack(spacing: 6) {
-                            Image(systemName: "slider.horizontal.3")
+                            Image(systemName: "checkmark.circle")
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.45))
 
-                            Text("Widget configuration controls will render here.")
+                            Text("This widget has no configurable preferences.")
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(.white.opacity(0.42))
                         }
                     }
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(
+                        Array(item.preferences.enumerated()),
+                        id: \.element.name
+                    ) { index, preference in
+                        WidgetPreferenceRow(
+                            preference: preference,
+                            storedValue: preferenceValues[preference.name],
+                            onSave: { onSavePreference(preference.name, $0) }
+                        )
+                        .id("\(item.id.uuidString):\(preference.name)")
+                        .overlay(alignment: .bottom) {
+                            if index < item.preferences.count - 1 {
+                                Divider()
+                                    .overlay(Color.white.opacity(0.05))
+                                    .padding(.leading, 16)
+                            }
+                        }
+                    }
+                }
+                .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(.white.opacity(0.07), lineWidth: 1)
+                )
             }
         }
         .padding(16)
@@ -795,6 +902,14 @@ private struct WidgetConfigurationPlaceholder: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .strokeBorder(.white.opacity(0.06), lineWidth: 1)
         )
+    }
+
+    private var configurationSubtitle: String {
+        let missing = item.missingRequiredPreferenceNames(given: preferenceValues)
+        if missing.isEmpty {
+            return "Update this widget instance’s preferences."
+        }
+        return "Complete the required preferences to enable this widget."
     }
 }
 
@@ -844,6 +959,235 @@ private struct WidgetInfoCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .strokeBorder(.white.opacity(0.06), lineWidth: 1)
         )
+    }
+}
+
+private struct WidgetPreferenceRow: View {
+    var preference: WidgetPreferenceDefinition
+    var storedValue: RuntimeJSONValue?
+    var onSave: (RuntimeJSONValue?) -> Void
+
+    var body: some View {
+        switch preference.type {
+        case .textfield:
+            AnyView(
+                WidgetTextPreferenceRow(
+                    preference: preference,
+                    storedValue: storedValue?.stringValue,
+                    isSecure: false,
+                    onSave: { value in
+                        onSave(.string(value))
+                    }
+                )
+            )
+        case .password:
+            AnyView(
+                WidgetTextPreferenceRow(
+                    preference: preference,
+                    storedValue: storedValue?.stringValue,
+                    isSecure: true,
+                    onSave: { value in
+                        onSave(.string(value))
+                    }
+                )
+            )
+        case .checkbox:
+            AnyView(
+                WidgetCheckboxPreferenceRow(
+                    preference: preference,
+                    storedValue: storedValue?.boolValue,
+                    onSave: { onSave(.bool($0)) }
+                )
+            )
+        case .dropdown:
+            AnyView(
+                WidgetDropdownPreferenceRow(
+                    preference: preference,
+                    storedValue: storedValue,
+                    onSave: onSave
+                )
+            )
+        }
+    }
+}
+
+private struct WidgetTextPreferenceRow: View {
+    var preference: WidgetPreferenceDefinition
+    var storedValue: String?
+    var isSecure: Bool
+    var onSave: (String) -> Void
+
+    @State private var draft = ""
+    @FocusState private var isFocused: Bool
+
+    private var resolvedValue: String {
+        storedValue
+            ?? preference.defaultValue?.stringValue
+            ?? ""
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            WidgetPreferenceHeader(preference: preference)
+
+            Group {
+                if isSecure {
+                    SecureField(preference.placeholder ?? preference.title, text: $draft)
+                        .textFieldStyle(.plain)
+                } else {
+                    TextField(preference.placeholder ?? preference.title, text: $draft)
+                        .textFieldStyle(.plain)
+                }
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(.white.opacity(0.9))
+            .padding(.horizontal, 12)
+            .frame(height: 34)
+            .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(.white.opacity(0.06), lineWidth: 1)
+            )
+            .focused($isFocused)
+            .onSubmit {
+                commit()
+            }
+            .onChange(of: isFocused) { _, focused in
+                if !focused {
+                    commit()
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .onAppear {
+            draft = resolvedValue
+        }
+        .onChange(of: storedValue) { _, _ in
+            if !isFocused {
+                draft = resolvedValue
+            }
+        }
+    }
+
+    private func commit() {
+        onSave(draft)
+    }
+}
+
+private struct WidgetCheckboxPreferenceRow: View {
+    var preference: WidgetPreferenceDefinition
+    var storedValue: Bool?
+    var onSave: (Bool) -> Void
+
+    private var resolvedValue: Bool {
+        storedValue
+            ?? preference.defaultValue?.boolValue
+            ?? false
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            WidgetPreferenceHeader(preference: preference, titleOverride: preference.label ?? preference.title)
+
+            Spacer(minLength: 12)
+
+            Toggle("", isOn: Binding(
+                get: { resolvedValue },
+                set: { onSave($0) }
+            ))
+            .toggleStyle(.switch)
+            .labelsHidden()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+}
+
+private struct WidgetDropdownPreferenceRow: View {
+    var preference: WidgetPreferenceDefinition
+    var storedValue: RuntimeJSONValue?
+    var onSave: (RuntimeJSONValue?) -> Void
+
+    private var options: [WidgetPreferenceDropdownItem] {
+        preference.data ?? []
+    }
+
+    private var selectionKey: String {
+        if let storedValue {
+            return selectionString(for: storedValue)
+        }
+        if let defaultValue = preference.defaultValue {
+            return selectionString(for: defaultValue)
+        }
+        return ""
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            WidgetPreferenceHeader(preference: preference)
+
+            Picker(
+                "",
+                selection: Binding(
+                    get: { selectionKey },
+                    set: { newValue in
+                        if newValue.isEmpty {
+                            onSave(nil)
+                        } else if let option = options.first(where: { selectionString(for: $0.value) == newValue }) {
+                            onSave(option.value)
+                        }
+                    }
+                )
+            ) {
+                Text("Select…").tag("")
+                ForEach(options.indices, id: \.self) { index in
+                    Text(options[index].title).tag(selectionString(for: options[index].value))
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    private func selectionString(for value: RuntimeJSONValue) -> String {
+        let encoded = (try? JSONEncoder().encode(value))
+            .flatMap { String(data: $0, encoding: .utf8) }
+            ?? "null"
+        return "json:\(encoded)"
+    }
+}
+
+private struct WidgetPreferenceHeader: View {
+    var preference: WidgetPreferenceDefinition
+    var titleOverride: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Text(titleOverride ?? preference.title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.88))
+
+                if preference.isRequired {
+                    Text("Required")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color(red: 1.0, green: 0.78, blue: 0.3))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color(red: 1.0, green: 0.78, blue: 0.3).opacity(0.12), in: Capsule(style: .continuous))
+                }
+            }
+
+            if let description = preference.description, !description.isEmpty {
+                Text(description)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.42))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }
 
@@ -897,6 +1241,20 @@ private struct WidgetSettingsSnapshot {
         var startColumn: Int
         var span: Int
         var tint: Color
+        var preferences: [WidgetPreferenceDefinition]
+
+        func missingRequiredPreferenceNames(given values: [String: RuntimeJSONValue]) -> [String] {
+            preferences.compactMap { preference in
+                guard preference.isRequired else { return nil }
+                let resolvedValue = values[preference.name] ?? preference.defaultValue
+                switch preference.type {
+                case .textfield, .password:
+                    return resolvedValue?.stringValue?.isEmpty == false ? nil : preference.name
+                case .checkbox, .dropdown:
+                    return resolvedValue == nil ? preference.name : nil
+                }
+            }
+        }
     }
 
     var views: [ViewSection]
@@ -927,7 +1285,8 @@ private struct WidgetSettingsSnapshot {
                         caption: definition.caption,
                         startColumn: widget.startColumn,
                         span: widget.span,
-                        tint: definition.tint
+                        tint: definition.tint,
+                        preferences: definition.preferences
                     )
                 }
 

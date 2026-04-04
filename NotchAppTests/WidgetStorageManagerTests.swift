@@ -165,6 +165,193 @@ final class WidgetStorageManagerTests: XCTestCase {
         XCTAssertEqual(secondSnapshot, .object(["count": .number(9)]))
     }
 
+    func testPreferenceStorageRoundTripsPerInstance() throws {
+        let (manager, rootURL) = makeManager()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let widgetID = "demo.widget"
+        let instanceID = UUID().uuidString
+
+        try manager.setPreferenceValue(
+            widgetID: widgetID,
+            instanceID: instanceID,
+            name: "mailbox",
+            value: .string("inbox")
+        )
+        manager.flushPendingWrites()
+
+        XCTAssertEqual(
+            manager.preferenceValues(widgetID: widgetID, instanceID: instanceID),
+            ["mailbox": .string("inbox")]
+        )
+    }
+
+    func testLocalStorageAllItemsHidesPreferenceEntries() throws {
+        let (manager, rootURL) = makeManager()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let widgetID = "demo.widget"
+        let instanceID = UUID().uuidString
+
+        _ = try manager.handleRPC(
+            widgetID: widgetID,
+            instanceID: instanceID,
+            method: "localStorage.setItem",
+            params: .object([
+                "key": .string("count"),
+                "value": .number(3)
+            ])
+        )
+        try manager.setPreferenceValue(
+            widgetID: widgetID,
+            instanceID: instanceID,
+            name: "mailbox",
+            value: .string("inbox")
+        )
+        manager.flushPendingWrites()
+
+        let snapshot = try manager.handleRPC(
+            widgetID: widgetID,
+            instanceID: instanceID,
+            method: "localStorage.allItems",
+            params: .object([:])
+        )
+
+        XCTAssertEqual(snapshot, .object(["count": .number(3)]))
+    }
+
+    func testLocalStorageRejectsReservedPreferenceNamespace() throws {
+        let (manager, rootURL) = makeManager()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let widgetID = "demo.widget"
+        let instanceID = UUID().uuidString
+
+        XCTAssertThrowsError(
+            try manager.handleRPC(
+                widgetID: widgetID,
+                instanceID: instanceID,
+                method: "localStorage.setItem",
+                params: .object([
+                    "key": .string("__widgetPreference__:mailbox"),
+                    "value": .string("inbox")
+                ])
+            )
+        )
+
+        XCTAssertThrowsError(
+            try manager.handleRPC(
+                widgetID: widgetID,
+                instanceID: instanceID,
+                method: "localStorage.removeItem",
+                params: .object([
+                    "key": .string("__widgetPreference__:mailbox")
+                ])
+            )
+        )
+    }
+
+    func testPreferenceStorageIsIsolatedBetweenInstances() throws {
+        let (manager, rootURL) = makeManager()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let widgetID = "demo.widget"
+        let firstInstanceID = UUID().uuidString
+        let secondInstanceID = UUID().uuidString
+
+        try manager.setPreferenceValue(
+            widgetID: widgetID,
+            instanceID: firstInstanceID,
+            name: "mailbox",
+            value: .string("personal")
+        )
+        try manager.setPreferenceValue(
+            widgetID: widgetID,
+            instanceID: secondInstanceID,
+            name: "mailbox",
+            value: .string("work")
+        )
+        manager.flushPendingWrites()
+
+        XCTAssertEqual(
+            manager.preferenceValues(widgetID: widgetID, instanceID: firstInstanceID),
+            ["mailbox": .string("personal")]
+        )
+        XCTAssertEqual(
+            manager.preferenceValues(widgetID: widgetID, instanceID: secondInstanceID),
+            ["mailbox": .string("work")]
+        )
+    }
+
+    func testResolvedPreferenceValuesApplyDefaultsAndReportMissingRequired() throws {
+        let (manager, rootURL) = makeManager()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let preferences = [
+            WidgetStoragePreferenceDefinition(
+                name: "mailbox",
+                kind: .text,
+                isRequired: true,
+                defaultValue: .string("inbox")
+            ),
+            WidgetStoragePreferenceDefinition(
+                name: "token",
+                kind: .password,
+                isRequired: true,
+                defaultValue: nil
+            )
+        ]
+
+        let instanceID = UUID().uuidString
+        XCTAssertEqual(
+            manager.resolvedPreferenceValues(
+                widgetID: "demo.widget",
+                preferences: preferences,
+                instanceID: instanceID
+            ),
+            ["mailbox": .string("inbox")]
+        )
+        XCTAssertEqual(
+            manager.missingRequiredPreferenceNames(
+                widgetID: "demo.widget",
+                preferences: preferences,
+                instanceID: instanceID
+            ),
+            ["token"]
+        )
+    }
+
+    func testRequiredTextPreferencesTreatEmptyStringsAsMissing() throws {
+        let (manager, rootURL) = makeManager()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let preferences = [
+            WidgetStoragePreferenceDefinition(
+                name: "imageUrl",
+                kind: .text,
+                isRequired: true,
+                defaultValue: nil
+            )
+        ]
+
+        let instanceID = UUID().uuidString
+        try manager.setPreferenceValue(
+            widgetID: "demo.widget",
+            instanceID: instanceID,
+            name: "imageUrl",
+            value: .string("")
+        )
+
+        XCTAssertEqual(
+            manager.missingRequiredPreferenceNames(
+                widgetID: "demo.widget",
+                preferences: preferences,
+                instanceID: instanceID
+            ),
+            ["imageUrl"]
+        )
+    }
+
     func testStorageRemoveDeletesPersistedValue() throws {
         let (manager, rootURL) = makeManager()
         defer { try? FileManager.default.removeItem(at: rootURL) }
