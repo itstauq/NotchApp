@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         logger.write("App launched")
+        Preferences.ensureLaunchAtLoginDefault()
         registerWithLaunchServices()
         registerURLHandler()
         updateStatusBarVisibility()

@@ -42,6 +42,7 @@ enum Preferences {
     private static let keyboardShortcutsEnabledKey = "keyboardShortcutsEnabled"
     private static let toggleLaneShortcutKeyCodeKey = "toggleLaneShortcutKeyCode"
     private static let toggleLaneShortcutModifiersKey = "toggleLaneShortcutModifiers"
+    private static let launchAtLoginConfiguredKey = "launchAtLoginConfigured"
 
     enum OpenLaneMode: String {
         case click
@@ -82,8 +83,24 @@ enum Preferences {
         return status == .enabled || status == .requiresApproval
     }
 
+    static func ensureLaunchAtLoginDefault() {
+        guard UserDefaults.standard.object(forKey: launchAtLoginConfiguredKey) == nil else {
+            return
+        }
+
+        UserDefaults.standard.set(true, forKey: launchAtLoginConfiguredKey)
+
+        guard !isLaunchAtLoginEnabled else {
+            return
+        }
+
+        _ = setLaunchAtLoginEnabled(true)
+    }
+
     @discardableResult
     static func setLaunchAtLoginEnabled(_ enabled: Bool) -> Bool {
+        UserDefaults.standard.set(true, forKey: launchAtLoginConfiguredKey)
+
         do {
             if enabled {
                 try SMAppService.mainApp.register()
@@ -116,7 +133,7 @@ enum Preferences {
         get {
             guard let rawValue = UserDefaults.standard.string(forKey: openLaneModeKey),
                   let mode = OpenLaneMode(rawValue: rawValue) else {
-                return .click
+                return .hover
             }
 
             return mode
