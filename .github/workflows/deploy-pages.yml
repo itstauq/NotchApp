@@ -1,6 +1,7 @@
 name: Deploy Pages
 
 on:
+  workflow_dispatch:
   release:
     types:
       - published
@@ -23,19 +24,36 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Check out release contents
+      - name: Resolve appcast release tag
+        id: release-tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RELEASE_TAG="$(gh api "repos/${{ github.repository }}/releases/latest" --jq .tag_name)"
+          else
+            RELEASE_TAG="${{ github.event.release.tag_name }}"
+          fi
+
+          if [ -z "$RELEASE_TAG" ] || [ "$RELEASE_TAG" = "null" ]; then
+            echo "Failed to resolve a release tag for appcast deployment" >&2
+            exit 1
+          fi
+
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Check out site contents
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.release.tag_name }}
 
       - name: Prepare Pages artifact
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release-tag.outputs.release_tag }}
         run: |
           PAGES_DIR="$RUNNER_TEMP/pages"
           mkdir -p "$PAGES_DIR"
           cp -R website/. "$PAGES_DIR"/
-          gh release download "${{ github.event.release.tag_name }}" \
+          gh release download "$RELEASE_TAG" \
             --repo "${{ github.repository }}" \
             --pattern appcast.xml \
             --dir "$PAGES_DIR"
