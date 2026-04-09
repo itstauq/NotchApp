@@ -1471,7 +1471,7 @@ private struct AboutSettingsPage: View {
                             value: "github.com/itstauq/Skylane",
                             destination: repositoryURL
                         )
-                        AboutInfoRow(label: "Commit", value: "b8da031")
+                        AboutInfoRow(label: "Commit", value: "cd2d8bd")
                     }
                     .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .overlay(
