@@ -12,7 +12,7 @@ import {
   Toolbar,
   ToolbarButton,
   useMedia,
-} from "@notchapp/api";
+} from "@skylane/api";
 
 export default function Widget() {
   const {

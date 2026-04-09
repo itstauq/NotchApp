@@ -1,20 +1,20 @@
 {
-  "name": "@notchapp/widget-music",
+  "name": "@skylane/widget-music",
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "develop": "notchapp develop",
-    "build": "notchapp build",
-    "lint": "notchapp lint"
+    "develop": "skylane develop",
+    "build": "skylane build",
+    "lint": "skylane lint"
   },
   "devDependencies": {
-    "notchapp": "^0.1.1"
+    "skylane": "^0.1.1"
   },
   "dependencies": {
-    "@notchapp/api": "^0.1.1"
+    "@skylane/api": "^0.1.1"
   },
-  "notch": {
-    "id": "com.notchapp.music",
+  "skylane": {
+    "id": "com.skylane.music",
     "title": "Music",
     "description": "Now playing",
     "icon": "music.note",

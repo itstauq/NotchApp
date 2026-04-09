@@ -1,11 +1,11 @@
-# @notchapp/api
+# @skylane/api
 
-React component API for building NotchApp widgets.
+React component API for building Skylane widgets.
 
 Install with:
 
 ```bash
-npm install @notchapp/api
+npm install @skylane/api
 ```
 
 The default authoring model is component-first. Reach for `Card`, `Field`, `List`, `EmptyState`, `Toolbar`, and `DropdownMenu` before you drop to raw primitives like `RoundedRect` or `Circle`.
@@ -28,7 +28,7 @@ import {
   Section,
   usePreference,
   useLocalStorage,
-} from "@notchapp/api";
+} from "@skylane/api";
 
 export default function Widget({ environment }) {
   const [draft, setDraft] = useLocalStorage("draft", "");
@@ -43,7 +43,7 @@ export default function Widget({ environment }) {
           </DropdownMenu>
         </Overlay>
         <CardContent>
-          <CardTitle>Hello from NotchApp</CardTitle>
+          <CardTitle>Hello from Skylane</CardTitle>
           <CardDescription>{`Span ${environment.span} • ${mailbox ?? "Inbox"} • Draft ${draft.length}`}</CardDescription>
         </CardContent>
       </Card>
@@ -109,7 +109,7 @@ Use the host data APIs in three patterns:
 `useMedia()` follows the same pattern and returns media state plus `play()`, `pause()`, `togglePlayPause()`, `nextTrack()`, `previousTrack()`, and `openSourceApp()`. Media updates are pushed from the host, action methods send transport commands without locally overwriting state, and `refresh()` is available for manual re-fetches when a widget wants an explicit sync point.
 
 ```tsx
-import { Text, useCameras, useMedia, usePreference } from "@notchapp/api";
+import { Text, useCameras, useMedia, usePreference } from "@skylane/api";
 
 export default function Widget() {
   const [mailbox] = usePreference("mailbox");
@@ -136,7 +136,7 @@ export default function Widget() {
 
 Local widget images live under your package `assets/` directory and can be referenced with paths like `src="assets/cover.png"`.
 
-`Image` supports local package assets, remote image URLs, and host-managed asset sources such as `media.artwork?.src` values like `notch-asset://image/<token>`. `contentMode="fill"` is the default, and `contentMode="fit"` keeps the full image visible inside its frame.
+`Image` supports local package assets, remote image URLs, and host-managed asset sources such as `media.artwork?.src` values like `skylane-asset://image/<token>`. `contentMode="fill"` is the default, and `contentMode="fit"` keeps the full image visible inside its frame.
 
 Remote image notes:
 

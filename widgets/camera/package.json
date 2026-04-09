@@ -1,20 +1,20 @@
 {
-  "name": "@notchapp/widget-camera-preview",
+  "name": "@skylane/widget-camera-preview",
   "version": "0.1.1",
   "private": true,
   "scripts": {
-    "develop": "notchapp develop",
-    "build": "notchapp build",
-    "lint": "notchapp lint"
+    "develop": "skylane develop",
+    "build": "skylane build",
+    "lint": "skylane lint"
   },
   "devDependencies": {
-    "notchapp": "^0.1.1"
+    "skylane": "^0.1.1"
   },
   "dependencies": {
-    "@notchapp/api": "^0.1.1"
+    "@skylane/api": "^0.1.1"
   },
-  "notch": {
-    "id": "com.notchapp.camera-preview",
+  "skylane": {
+    "id": "com.skylane.camera-preview",
     "title": "Camera Preview",
     "description": "Mirror preview",
     "icon": "camera.fill",

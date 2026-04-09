@@ -132,7 +132,7 @@ function loadAPI() {
   return module.exports;
 }
 
-test("@notchapp/api exports the extended non-image component surface", () => {
+test("@skylane/api exports the extended non-image component surface", () => {
   const api = loadAPI();
 
   for (const name of [
@@ -163,7 +163,7 @@ test("@notchapp/api exports the extended non-image component surface", () => {
   }
 });
 
-test("@notchapp/api no longer exports the old imperative camera and preference helpers", () => {
+test("@skylane/api no longer exports the old imperative camera and preference helpers", () => {
   const api = loadAPI();
   assert.equal(api.getPreferenceValues, undefined);
   assert.equal(api.setPreferenceValue, undefined);
@@ -232,9 +232,9 @@ test("component wrappers emit host elements with the expected props", () => {
   assert.equal(remoteImage.props.src, "https://example.com/cover.png");
   assert.equal(remoteImage.props.contentMode, "fit");
   assert.equal(Array.isArray(row.props.children), true);
-  assert.equal(inputChildren[0].type, "__notch_trailingAccessory");
+  assert.equal(inputChildren[0].type, "__skylane_trailingAccessory");
   assert.equal(inputChildren[0].props.children.type, "Icon");
-  assert.equal(roundedRectChildren[0].type, "__notch_overlay");
+  assert.equal(roundedRectChildren[0].type, "__skylane_overlay");
   assert.equal(roundedRectChildren[0].key, "overlay-plus");
   assert.equal(roundedRectChildren[0].props.children.type, "IconButton");
   assert.equal(marquee.props.active, false);

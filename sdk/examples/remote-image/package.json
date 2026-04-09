@@ -1,20 +1,20 @@
 {
-  "name": "@notchapp/example-remote-image",
+  "name": "@skylane/example-remote-image",
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "notchapp develop",
-    "build": "notchapp build",
-    "lint": "notchapp lint"
+    "dev": "skylane develop",
+    "build": "skylane build",
+    "lint": "skylane lint"
   },
   "devDependencies": {
-    "notchapp": "^0.1.0"
+    "skylane": "^0.1.0"
   },
   "dependencies": {
-    "@notchapp/api": "^0.1.0"
+    "@skylane/api": "^0.1.0"
   },
-  "notch": {
-    "id": "com.notchapp.remote-image",
+  "skylane": {
+    "id": "com.skylane.remote-image",
     "title": "Remote Image",
     "description": "Remote image example",
     "icon": "network",

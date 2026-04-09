@@ -54,7 +54,7 @@ function runNodeEval(script, options = {}) {
 }
 
 test("installRuntimeSecurity allows the trusted entry path and blocks nested path requires", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-entry-");
+  const dir = createTempDir(t, "skylane-runtime-entry-");
   const bundlePath = path.join(dir, "bundle.cjs");
   const nestedPath = path.join(dir, "secret.json");
 
@@ -170,7 +170,7 @@ test("installRuntimeSecurity preserves NODE_ENV for runtime-owned React loading"
 });
 
 test("widget bundle loading hides WebAssembly without mutating the runtime global", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-widget-globals-");
+  const dir = createTempDir(t, "skylane-runtime-widget-globals-");
   const bundlePath = path.join(dir, "bundle.cjs");
   const result = await runNodeEval(`
     import { installRuntimeSecurity } from ${JSON.stringify(securityModuleUrl)};
@@ -220,8 +220,8 @@ test("widget bundle loading hides WebAssembly without mutating the runtime globa
           + '    globalThis.crypto.getRandomValues(bytes);\\n'
           + '    return bytes.length;\\n'
           + '  })(),\\n'
-          + '  leakedHelperType: typeof __notchRealGlobalThis,\\n'
-          + '  leakedScopeType: typeof __notchWidgetScope,\\n'
+          + '  leakedHelperType: typeof __skylaneRealGlobalThis,\\n'
+          + '  leakedScopeType: typeof __skylaneWidgetScope,\\n'
           + '};\\n'
       );
     });
@@ -277,7 +277,7 @@ test("widget bundle loading hides WebAssembly without mutating the runtime globa
 });
 
 test("widget bundle loading still allows local global-like identifiers", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-widget-locals-");
+  const dir = createTempDir(t, "skylane-runtime-widget-locals-");
   const bundlePath = path.join(dir, "bundle.cjs");
   const result = await runNodeEval(`
     import fs from "node:fs";
@@ -312,7 +312,7 @@ test("widget bundle loading still allows local global-like identifiers", async (
 });
 
 test("widget bundle loading keeps global deletions scoped to the widget overlay", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-widget-deletes-");
+  const dir = createTempDir(t, "skylane-runtime-widget-deletes-");
   const bundlePath = path.join(dir, "bundle.cjs");
   const result = await runNodeEval(`
     import fs from "node:fs";
@@ -368,7 +368,7 @@ test("widget bundle loading keeps global deletions scoped to the widget overlay"
 });
 
 test("widget bundle loading exposes runtime-owned globals through configurable proxy descriptors", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-widget-descriptors-");
+  const dir = createTempDir(t, "skylane-runtime-widget-descriptors-");
   const bundlePath = path.join(dir, "bundle.cjs");
   const result = await runNodeEval(`
     import fs from "node:fs";
@@ -404,7 +404,7 @@ test("widget bundle loading exposes runtime-owned globals through configurable p
 });
 
 test("widget bundle loading shadows runtime-owned globals without mutating the runtime global", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-widget-shadows-");
+  const dir = createTempDir(t, "skylane-runtime-widget-shadows-");
   const bundlePath = path.join(dir, "bundle.cjs");
   const result = await runNodeEval(`
     import fs from "node:fs";
@@ -447,7 +447,7 @@ test("widget bundle loading shadows runtime-owned globals without mutating the r
 });
 
 test("widget bundle loading preserves CommonJS parent and top-level arguments", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-widget-cjs-wrapper-");
+  const dir = createTempDir(t, "skylane-runtime-widget-cjs-wrapper-");
   const bundlePath = path.join(dir, "bundle.cjs");
   const result = await runNodeEval(`
     import fs from "node:fs";
@@ -494,7 +494,7 @@ test("widget bundle loading preserves CommonJS parent and top-level arguments", 
 });
 
 test("worker bootstrap keeps runtime fetch deletable at the widget layer", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-worker-fetch-delete-");
+  const dir = createTempDir(t, "skylane-runtime-worker-fetch-delete-");
   const bundlePath = path.join(dir, "bundle.cjs");
   const workerModuleUrl = pathToFileURL(path.join(runtimeRoot, "worker.mjs")).href;
   fs.writeFileSync(
@@ -575,7 +575,7 @@ test("worker bootstrap keeps runtime fetch deletable at the widget layer", async
 });
 
 test("widget bundle loading rejects dynamic import in prebuilt bundles", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-widget-dynamic-import-");
+  const dir = createTempDir(t, "skylane-runtime-widget-dynamic-import-");
   const bundlePath = path.join(dir, "bundle.cjs");
   const result = await runNodeEval(`
     import fs from "node:fs";
@@ -667,7 +667,7 @@ test("installRuntimeSecurity blocks disallowed built-ins", async () => {
 });
 
 test("installRuntimeSecurity blocks file URL and require.resolve path specifiers", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-path-specifiers-");
+  const dir = createTempDir(t, "skylane-runtime-path-specifiers-");
   const nestedPath = path.join(dir, "secret.json");
   const result = await runNodeEval(`
     import fs from "node:fs";
@@ -702,7 +702,7 @@ test("installRuntimeSecurity blocks file URL and require.resolve path specifiers
 });
 
 test("installRuntimeSecurity does not trust caller-controlled createRequire filenames", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-create-require-");
+  const dir = createTempDir(t, "skylane-runtime-create-require-");
   const nestedPath = path.join(dir, "secret.json");
   const workerPath = path.join(runtimeRoot, "worker.mjs");
   const result = await runNodeEval(`
@@ -734,7 +734,7 @@ test("installRuntimeSecurity does not trust caller-controlled createRequire file
 });
 
 test("installRuntimeSecurity does not trust forged parent objects in Module._load", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-forged-parent-");
+  const dir = createTempDir(t, "skylane-runtime-forged-parent-");
   const nestedPath = path.join(dir, "secret.json");
   const workerPath = path.join(runtimeRoot, "worker.mjs");
   const result = await runNodeEval(`
@@ -765,7 +765,7 @@ test("installRuntimeSecurity does not trust forged parent objects in Module._loa
 });
 
 test("installRuntimeSecurity does not trust runtime modules leaked through require.cache", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-cache-parent-");
+  const dir = createTempDir(t, "skylane-runtime-cache-parent-");
   const nestedPath = path.join(dir, "secret.json");
   const reactShimPath = path.join(runtimeRoot, "react-shim.cjs");
   const reactPath = path.join(runtimeRoot, "node_modules", "react", "index.js");
@@ -813,7 +813,7 @@ test("installRuntimeSecurity does not trust runtime modules leaked through requi
 });
 
 test("installRuntimeSecurity does not open a trust window for cached runtime modules", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-cache-rerequire-");
+  const dir = createTempDir(t, "skylane-runtime-cache-rerequire-");
   const nestedPath = path.join(dir, "secret.json");
   const reactShimPath = path.join(runtimeRoot, "react-shim.cjs");
   const result = await runNodeEval(`
@@ -860,7 +860,7 @@ test("installRuntimeSecurity does not open a trust window for cached runtime mod
 });
 
 test("installRuntimeSecurity blocks direct Module.prototype.load escapes", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-module-load-");
+  const dir = createTempDir(t, "skylane-runtime-module-load-");
   const nestedPath = path.join(dir, "secret.json");
   const result = await runNodeEval(`
     import fs from "node:fs";
@@ -895,7 +895,7 @@ test("installRuntimeSecurity blocks direct Module.prototype.load escapes", async
 });
 
 test("installRuntimeSecurity blocks direct Module._extensions loader escapes", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-module-extensions-");
+  const dir = createTempDir(t, "skylane-runtime-module-extensions-");
   const nestedPath = path.join(dir, "secret.json");
   const result = await runNodeEval(`
     import fs from "node:fs";
@@ -959,7 +959,7 @@ test("installRuntimeSecurity blocks direct module._compile escapes", async (t) =
 });
 
 test("installRuntimeSecurity blocks top-level recursive module._compile escapes", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-compile-recursive-");
+  const dir = createTempDir(t, "skylane-runtime-compile-recursive-");
   const bundlePath = path.join(dir, "bundle.cjs");
   const result = await runNodeEval(`
     import fs from "node:fs";

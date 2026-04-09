@@ -71,7 +71,7 @@ bootstrap_node() {
 }
 
 bootstrap_deps() {
-  if [ ! -d "$SDK_ROOT/node_modules/notchapp" ]; then
+  if [ ! -d "$SDK_ROOT/node_modules/skylane" ]; then
     echo "Installing widget tooling dependencies..."
     "$NPM_BIN" ci --prefix "$SDK_ROOT"
   fi
@@ -99,4 +99,4 @@ if [ "${1:-}" = "v2" ]; then
   exec "$NODE_BIN" "$RUNTIME_ROOT/runtime-v2.mjs" "$@"
 fi
 
-exec "$NODE_BIN" "$SDK_ROOT/packages/notchapp/cli.mjs" "$@"
+exec "$NODE_BIN" "$SDK_ROOT/packages/skylane/cli.mjs" "$@"

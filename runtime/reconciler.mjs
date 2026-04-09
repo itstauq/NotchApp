@@ -8,10 +8,10 @@ const React = require("react");
 const ReactReconciler = require("react-reconciler");
 const { DefaultEventPriority } = require("react-reconciler/constants");
 
-const OVERLAY_SLOT_TYPE = "__notch_overlay";
-const LEADING_ACCESSORY_SLOT_TYPE = "__notch_leadingAccessory";
-const TRAILING_ACCESSORY_SLOT_TYPE = "__notch_trailingAccessory";
-const MENU_LABEL_SLOT_TYPE = "__notch_menuLabel";
+const OVERLAY_SLOT_TYPE = "__skylane_overlay";
+const LEADING_ACCESSORY_SLOT_TYPE = "__skylane_leadingAccessory";
+const TRAILING_ACCESSORY_SLOT_TYPE = "__skylane_trailingAccessory";
+const MENU_LABEL_SLOT_TYPE = "__skylane_menuLabel";
 let nextHostNodeId = 0;
 
 function appendChild(parent, child) {

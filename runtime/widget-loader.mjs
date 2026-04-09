@@ -25,8 +25,8 @@ const wrapperLocalNames = Object.freeze([
 ]);
 const widgetPreludeLines = Object.freeze([
   "with ((() => {",
-  "  const scope = module.__notchWidgetScope;",
-  "  delete module.__notchWidgetScope;",
+  "  const scope = module.__skylaneWidgetScope;",
+  "  delete module.__skylaneWidgetScope;",
   "  return scope;",
   "})()) {",
   "(function(exports, require, module, __filename, __dirname) {",
@@ -381,7 +381,7 @@ export function loadWidgetBundle(bundlePath) {
   widgetModule.filename = resolvedBundlePath;
   widgetModule.path = path.dirname(resolvedBundlePath);
   widgetModule.paths = moduleConstructor._nodeModulePaths(widgetModule.path);
-  widgetModule.__notchWidgetScope = createWidgetGlobalScope(globalThis);
+  widgetModule.__skylaneWidgetScope = createWidgetGlobalScope(globalThis);
 
   Module._cache[resolvedBundlePath] = widgetModule;
 

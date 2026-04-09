@@ -1,4 +1,4 @@
-Prebuilt `mediaremote-adapter` artifacts vendored for NotchApp direct-download builds.
+Prebuilt `mediaremote-adapter` artifacts vendored for Skylane direct-download builds.
 
 Contents:
 - `mediaremote-adapter.pl`

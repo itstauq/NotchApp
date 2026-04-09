@@ -18,10 +18,10 @@ Module._initPaths();
 const require = createRequire(import.meta.url);
 const React = require("react");
 const api = require("../../sdk/packages/api");
-const OVERLAY_SLOT_TYPE = "__notch_overlay";
-const LEADING_ACCESSORY_SLOT_TYPE = "__notch_leadingAccessory";
-const TRAILING_ACCESSORY_SLOT_TYPE = "__notch_trailingAccessory";
-const MENU_LABEL_SLOT_TYPE = "__notch_menuLabel";
+const OVERLAY_SLOT_TYPE = "__skylane_overlay";
+const LEADING_ACCESSORY_SLOT_TYPE = "__skylane_leadingAccessory";
+const TRAILING_ACCESSORY_SLOT_TYPE = "__skylane_trailingAccessory";
+const MENU_LABEL_SLOT_TYPE = "__skylane_menuLabel";
 
 const mockTheme = {
   colors: {
@@ -95,7 +95,7 @@ function resetMockRuntime() {
   hostEvents.clear();
 }
 
-globalThis.__NOTCH_RUNTIME__ = {
+globalThis.__SKYLANE_RUNTIME__ = {
   localStorage: {
     getItem() {
       return null;

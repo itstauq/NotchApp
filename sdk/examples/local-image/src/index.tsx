@@ -1,4 +1,4 @@
-import { Image, RoundedRect, Stack, Text } from "@notchapp/api";
+import { Image, RoundedRect, Stack, Text } from "@skylane/api";
 
 export default function Widget() {
   return (

@@ -68,7 +68,7 @@ if [ -d "$WIDGETS_ROOT" ]; then
 
     (
       cd "$widget_dir"
-      "$WIDGET_BUILD_NODE" "$REPO_ROOT/sdk/packages/notchapp/cli.mjs" build
+      "$WIDGET_BUILD_NODE" "$REPO_ROOT/sdk/packages/skylane/cli.mjs" build
     )
 
     widget_name="$(basename "$widget_dir")"

@@ -8,8 +8,8 @@ bump-version bump_type:
     set -euo pipefail
 
     REPO_ROOT="{{ repo_root }}"
-    PROJECT_FILE="$REPO_ROOT/NotchApp.xcodeproj/project.pbxproj"
-    SETTINGS_FILE="$REPO_ROOT/NotchApp/AppSettingsView.swift"
+    PROJECT_FILE="$REPO_ROOT/Skylane.xcodeproj/project.pbxproj"
+    SETTINGS_FILE="$REPO_ROOT/Skylane/AppSettingsView.swift"
     BUMP_TYPE="{{ bump_type }}"
 
     case "$BUMP_TYPE" in
@@ -86,8 +86,8 @@ test:
 
     echo "Running macOS unit tests..."
     xcodebuild test \
-      -project "$REPO_ROOT/NotchApp.xcodeproj" \
-      -scheme NotchAppTests \
+      -project "$REPO_ROOT/Skylane.xcodeproj" \
+      -scheme SkylaneTests \
       -configuration Debug \
       -destination "platform=macOS" \
       -derivedDataPath "$DERIVED_DATA_PATH" \
@@ -102,20 +102,20 @@ dev no_build='false':
 
     REPO_ROOT="{{ repo_root }}"
     DERIVED_DATA_PATH="$REPO_ROOT/.build/DerivedData"
-    APP_PATH="$DERIVED_DATA_PATH/Build/Products/Debug/NotchApp.app"
+    APP_PATH="$DERIVED_DATA_PATH/Build/Products/Debug/Skylane.app"
 
     if [ "{{ no_build }}" != "true" ]; then
       xcodebuild \
-        -project "$REPO_ROOT/NotchApp.xcodeproj" \
-        -scheme NotchApp \
+        -project "$REPO_ROOT/Skylane.xcodeproj" \
+        -scheme Skylane \
         -configuration Debug \
         -derivedDataPath "$DERIVED_DATA_PATH" \
         build 2>&1 | grep -E "(error:|warning:|BUILD)" | tail -10
     fi
 
-    OLD_PIDS="$(pgrep -x NotchApp 2>/dev/null || true)"
+    OLD_PIDS="$(pgrep -x Skylane 2>/dev/null || true)"
     if [ -n "$OLD_PIDS" ]; then
-      pkill -x NotchApp 2>/dev/null || true
+      pkill -x Skylane 2>/dev/null || true
 
       for pid in $OLD_PIDS; do
         while kill -0 "$pid" 2>/dev/null; do
@@ -125,7 +125,7 @@ dev no_build='false':
     fi
 
     open "$APP_PATH"
-    echo "Running. Logs: tail -f notchapp.log"
+    echo "Running. Logs: tail -f skylane.log"
 
 [arg("sign", long="sign", value="true", help="Sign the release archive for distribution")]
 package sign='false':
@@ -145,11 +145,11 @@ package sign='false':
 
     if [ "{{ sign }}" = "true" ]; then
       xcodebuild archive \
-        -project "$REPO_ROOT/NotchApp.xcodeproj" \
-        -scheme NotchApp \
+        -project "$REPO_ROOT/Skylane.xcodeproj" \
+        -scheme Skylane \
         -configuration Release \
         -destination "generic/platform=macOS" \
-        -archivePath "$REPO_ROOT/.build/release/NotchApp.xcarchive" \
+        -archivePath "$REPO_ROOT/.build/release/Skylane.xcarchive" \
         -derivedDataPath "$REPO_ROOT/.build/release/DerivedData" \
         -clonedSourcePackagesDirPath "$REPO_ROOT/.build/release/SourcePackages" \
         CODE_SIGN_STYLE=Manual \
@@ -159,18 +159,18 @@ package sign='false':
         PROVISIONING_PROFILE=""
     else
       xcodebuild archive \
-        -project "$REPO_ROOT/NotchApp.xcodeproj" \
-        -scheme NotchApp \
+        -project "$REPO_ROOT/Skylane.xcodeproj" \
+        -scheme Skylane \
         -configuration Release \
         -destination "generic/platform=macOS" \
-        -archivePath "$REPO_ROOT/.build/release/NotchApp.xcarchive" \
+        -archivePath "$REPO_ROOT/.build/release/Skylane.xcarchive" \
         -derivedDataPath "$REPO_ROOT/.build/release/DerivedData" \
         -clonedSourcePackagesDirPath "$REPO_ROOT/.build/release/SourcePackages" \
         CODE_SIGNING_ALLOWED=NO \
         CODE_SIGNING_REQUIRED=NO
     fi
 
-    APP_PATH="$REPO_ROOT/.build/release/NotchApp.xcarchive/Products/Applications/NotchApp.app"
+    APP_PATH="$REPO_ROOT/.build/release/Skylane.xcarchive/Products/Applications/Skylane.app"
     FRAMEWORK_PATH="$APP_PATH/Contents/Resources/WidgetRuntime/mediaremote-adapter/MediaRemoteAdapter.framework"
 
     if [ "{{ sign }}" != "true" ]; then
@@ -190,7 +190,7 @@ package sign='false':
       --sign "$SIGNING_IDENTITY" \
       --options runtime \
       --timestamp \
-      --entitlements "$REPO_ROOT/NotchApp/NotchApp.entitlements" \
+      --entitlements "$REPO_ROOT/Skylane/Skylane.entitlements" \
       "$APP_PATH"
 
     codesign --verify --deep --strict --verbose=2 "$APP_PATH"
@@ -200,7 +200,7 @@ build-dmg:
     set -euo pipefail
 
     REPO_ROOT="{{ repo_root }}"
-    APP_PATH="$REPO_ROOT/.build/release/NotchApp.xcarchive/Products/Applications/NotchApp.app"
+    APP_PATH="$REPO_ROOT/.build/release/Skylane.xcarchive/Products/Applications/Skylane.app"
     SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-Developer ID Application}"
 
     mkdir -p "$REPO_ROOT/.build/release/artifacts"

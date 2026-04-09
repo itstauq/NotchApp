@@ -12,7 +12,7 @@ import {
   ListItemTitle,
   Section,
   useLocalStorage,
-} from "@notchapp/api";
+} from "@skylane/api";
 
 function normalizeItems(value) {
   if (!Array.isArray(value)) {

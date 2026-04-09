@@ -1,20 +1,20 @@
 {
-  "name": "@notchapp/example-hello",
+  "name": "@skylane/example-hello",
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "notchapp develop",
-    "build": "notchapp build",
-    "lint": "notchapp lint"
+    "dev": "skylane develop",
+    "build": "skylane build",
+    "lint": "skylane lint"
   },
   "devDependencies": {
-    "notchapp": "^0.1.0"
+    "skylane": "^0.1.0"
   },
   "dependencies": {
-    "@notchapp/api": "^0.1.0"
+    "@skylane/api": "^0.1.0"
   },
-  "notch": {
-    "id": "com.notchapp.hello",
+  "skylane": {
+    "id": "com.skylane.hello",
     "title": "Hello",
     "description": "Minimal example widget",
     "icon": "bolt.horizontal.circle.fill",

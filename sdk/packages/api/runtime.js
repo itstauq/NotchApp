@@ -1,9 +1,9 @@
 function runtime() {
-  if (!globalThis.__NOTCH_RUNTIME__) {
-    throw new Error("@notchapp/api must run inside the Notch widget runtime");
+  if (!globalThis.__SKYLANE_RUNTIME__) {
+    throw new Error("@skylane/api must run inside the Skylane widget runtime");
   }
 
-  return globalThis.__NOTCH_RUNTIME__;
+  return globalThis.__SKYLANE_RUNTIME__;
 }
 
 module.exports = {

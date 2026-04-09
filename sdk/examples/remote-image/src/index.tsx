@@ -1,4 +1,4 @@
-import { Image, RoundedRect, Stack, Text } from "@notchapp/api";
+import { Image, RoundedRect, Stack, Text } from "@skylane/api";
 
 const REMOTE_IMAGE_URL = "https://placehold.co/224x112/png?text=Remote+Image";
 

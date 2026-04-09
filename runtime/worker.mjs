@@ -34,8 +34,8 @@ const runtimeModuleMap = new Map([
   ["react-shim", path.join(runtimeDir, "react-shim.cjs")],
   ["react", path.join(runtimeDir, "react-shim.cjs")],
   ["react/jsx-runtime", path.join(runtimeDir, "node_modules", "react", "jsx-runtime.js")],
-  ["@notchapp/api", path.join(apiDir, "index.js")],
-  ["@notchapp/api/jsx-runtime", path.join(apiDir, "jsx-runtime.js")],
+  ["@skylane/api", path.join(apiDir, "index.js")],
+  ["@skylane/api/jsx-runtime", path.join(apiDir, "jsx-runtime.js")],
 ]);
 
 installRuntimeSecurity({
@@ -278,7 +278,7 @@ async function bootstrap() {
     writable: false,
   });
 
-  globalThis.__NOTCH_RUNTIME__ = {
+  globalThis.__SKYLANE_RUNTIME__ = {
     localStorage: storage,
     getCurrentProps: () => currentProps,
     callRpc,

@@ -1,16 +1,16 @@
 # Widget Development
 
-Build widgets for NotchApp with `notchapp` and `@notchapp/api`.
+Build widgets for Skylane with `skylane` and `@skylane/api`.
 
-The day-to-day workflow is simple: install the SDK in your widget package, run `npx notchapp dev`, and let NotchApp hot-reload your widget while you edit.
+The day-to-day workflow is simple: install the SDK in your widget package, run `npx skylane dev`, and let Skylane hot-reload your widget while you edit.
 
 ## Install
 
 Create a widget package and install the SDK:
 
 ```bash
-npm install --save-dev notchapp
-npm install @notchapp/api
+npm install --save-dev skylane
+npm install @skylane/api
 ```
 
 Minimal layout:
@@ -27,20 +27,20 @@ Example `package.json`:
 
 ```json
 {
-  "name": "@acme/notchapp-widget-hello",
+  "name": "@acme/skylane-widget-hello",
   "private": true,
   "scripts": {
-    "dev": "notchapp dev",
-    "build": "notchapp build",
-    "lint": "notchapp lint"
+    "dev": "skylane dev",
+    "build": "skylane build",
+    "lint": "skylane lint"
   },
   "devDependencies": {
-    "notchapp": "^0.1.0"
+    "skylane": "^0.1.0"
   },
   "dependencies": {
-    "@notchapp/api": "^0.1.0"
+    "@skylane/api": "^0.1.0"
   },
-  "notch": {
+  "skylane": {
     "id": "com.acme.hello",
     "title": "Hello",
     "icon": "sparkles",
@@ -56,7 +56,7 @@ Example `package.json`:
 Run this inside your widget directory:
 
 ```bash
-npx notchapp dev
+npx skylane dev
 ```
 
 Or:
@@ -65,28 +65,28 @@ Or:
 npm run dev
 ```
 
-`notchapp dev` is the main development workflow. It:
+`skylane dev` is the main development workflow. It:
 
-- builds your widget into `.notch/build/index.cjs`
-- copies package-local assets into `.notch/build/assets`
-- registers the local widget with NotchApp for development
+- builds your widget into `.skylane/build/index.cjs`
+- copies package-local assets into `.skylane/build/assets`
+- registers the local widget with Skylane for development
 - watches `package.json`, `src/`, and `assets/`
 - rebuilds and reloads the widget whenever you save changes
 - prints build output in the terminal
 
 That means the normal loop is just:
 
-1. run `npx notchapp dev`
+1. run `npx skylane dev`
 2. edit your widget
 3. save
-4. see the updated widget in NotchApp
+4. see the updated widget in Skylane
 
 ## Build
 
 Create a production build with:
 
 ```bash
-npx notchapp build
+npx skylane build
 ```
 
 ## Lint
@@ -94,7 +94,7 @@ npx notchapp build
 Validate the widget manifest and entry file with:
 
 ```bash
-npx notchapp lint
+npx skylane lint
 ```
 
 ## Write a Widget
@@ -102,8 +102,8 @@ npx notchapp lint
 Each widget needs:
 
 - a `default` export that renders the widget
-- a `notch` manifest in `package.json`
-- any state it needs through normal React hooks or `@notchapp/api`
+- a `skylane` manifest in `package.json`
+- any state it needs through normal React hooks or `@skylane/api`
 
 The recommended authoring style is component-first. Reach for `Card`, `Field`, `List`, `EmptyState`, `Toolbar`, and `DropdownMenu` first. Use low-level primitives like `RoundedRect`, `Circle`, `Stack`, and `Inline` when you intentionally need bespoke layout or presentation.
 
@@ -120,7 +120,7 @@ import {
   Input,
   Section,
   useLocalStorage,
-} from "@notchapp/api";
+} from "@skylane/api";
 
 export default function Widget({ environment }) {
   const [draft, setDraft] = useLocalStorage("draft", "");
@@ -131,7 +131,7 @@ export default function Widget({ environment }) {
     <Section spacing="md">
       <Card>
         <CardContent>
-          <CardTitle>Hello from NotchApp</CardTitle>
+          <CardTitle>Hello from Skylane</CardTitle>
           <CardDescription>{`Span ${environment.span} • Draft ${draft.length}`}</CardDescription>
         </CardContent>
       </Card>
@@ -176,7 +176,7 @@ For most widget code, prefer the React-style aliases:
 
 ## UI System
 
-The primary UI surface in `@notchapp/api` is organized around product components:
+The primary UI surface in `@skylane/api` is organized around product components:
 
 - cards: `Card`, `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `CardFooter`
 - sections: `Section`, `SectionHeader`, `SectionTitle`, `SectionDescription`
@@ -220,11 +220,11 @@ Examples:
 
 ## Preferences
 
-Widget preferences are host-managed configuration values defined in the widget manifest and edited per widget instance inside NotchApp.
+Widget preferences are host-managed configuration values defined in the widget manifest and edited per widget instance inside Skylane.
 
 This keeps the manifest model intentionally close to Raycast, but widgets read values through React hooks:
 
-- preferences are declared under `notch.preferences`
+- preferences are declared under `skylane.preferences`
 - values are read with `usePreference("name")`
 - values are resolved before widget code sees them
 - required preferences block normal widget rendering until configured
@@ -244,7 +244,7 @@ That means preferences are:
 Example:
 
 ```tsx
-import { Image, RoundedRect, Stack, Text, usePreference } from "@notchapp/api";
+import { Image, RoundedRect, Stack, Text, usePreference } from "@skylane/api";
 
 export default function Widget() {
   const [imageUrl] = usePreference("imageUrl");
@@ -291,8 +291,8 @@ Supported preference `type` values today:
 
 If a preference has `required: true` and still resolves to no usable value:
 
-- the widget does not render normally in the notch
-- NotchApp shows a host `Configuration Required` state
+- the widget does not render normally in the compact surface
+- Skylane shows a host `Configuration Required` state
 - the user can open that widget instance’s settings from there
 
 For required text-like fields:
@@ -303,7 +303,7 @@ Optional fields without a saved value or default resolve to `undefined`.
 
 ## Manifest
 
-Each widget declares a `notch` block in `package.json`.
+Each widget declares a `skylane` block in `package.json`.
 
 Required fields:
 
@@ -347,20 +347,20 @@ Extended example with preferences:
 
 ```json
 {
-  "name": "@acme/notchapp-widget-remote-image",
+  "name": "@acme/skylane-widget-remote-image",
   "private": true,
   "scripts": {
-    "dev": "notchapp dev",
-    "build": "notchapp build",
-    "lint": "notchapp lint"
+    "dev": "skylane dev",
+    "build": "skylane build",
+    "lint": "skylane lint"
   },
   "devDependencies": {
-    "notchapp": "^0.1.0"
+    "skylane": "^0.1.0"
   },
   "dependencies": {
-    "@notchapp/api": "^0.1.0"
+    "@skylane/api": "^0.1.0"
   },
-  "notch": {
+  "skylane": {
     "id": "com.acme.remote-image",
     "title": "Remote Image",
     "description": "Remote image example",
@@ -407,7 +407,7 @@ Extended example with preferences:
 
 ## Components
 
-`@notchapp/api` exports both product components and low-level primitives.
+`@skylane/api` exports both product components and low-level primitives.
 
 Primary UI components:
 
@@ -461,7 +461,7 @@ Important differences:
 For local widget images, place files under your package `assets/` directory and reference them with package-relative paths:
 
 ```tsx
-import { Image, RoundedRect } from "@notchapp/api";
+import { Image, RoundedRect } from "@skylane/api";
 
 export default function Widget() {
   return (
@@ -472,7 +472,7 @@ export default function Widget() {
 }
 ```
 
-`notchapp build` and `notchapp dev` copy `assets/` into `.notch/build/assets`, so `src="assets/cover.png"` works in both local development and packaged widget installs.
+`skylane build` and `skylane dev` copy `assets/` into `.skylane/build/assets`, so `src="assets/cover.png"` works in both local development and packaged widget installs.
 
 ## Remote Images
 
@@ -485,7 +485,7 @@ Remote image URLs are fetched by the host image pipeline, not by widget code.
 Example:
 
 ```tsx
-import { Image, RoundedRect, usePreference } from "@notchapp/api";
+import { Image, RoundedRect, usePreference } from "@skylane/api";
 
 export default function Widget() {
   const [imageUrl] = usePreference("imageUrl");
@@ -504,9 +504,9 @@ export default function Widget() {
 - `contentMode="fill"` (default)
 - `contentMode="fit"`
 
-## Configure in NotchApp
+## Configure in Skylane
 
-Widget preferences are edited inside NotchApp:
+Widget preferences are edited inside Skylane:
 
 1. open Settings
 2. go to `Widgets`
@@ -529,8 +529,8 @@ If a remote image does not load:
 - make sure the URL is `https://`
 - make sure the response is actually an image
 
-If `notchapp lint` fails:
+If `skylane lint` fails:
 
-- verify the `notch` manifest block exists
+- verify the `skylane` manifest block exists
 - verify `entry` points to a real file
 - verify preference definitions use supported field names and types

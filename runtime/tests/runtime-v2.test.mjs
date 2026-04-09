@@ -129,7 +129,7 @@ function createRuntimeHarness(t) {
 }
 
 test("runtime-v2 forwards updateProps to mounted workers and rerenders with the new environment", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-v2-update-props-");
+  const dir = createTempDir(t, "skylane-runtime-v2-update-props-");
   const bundlePath = path.join(dir, "bundle.cjs");
 
   fs.writeFileSync(
@@ -221,14 +221,14 @@ test("runtime-v2 forwards updateProps to mounted workers and rerenders with the 
 });
 
 test("runtime-v2 forwards host events to mounted workers so useMedia can update without polling", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-v2-host-event-");
+  const dir = createTempDir(t, "skylane-runtime-v2-host-event-");
   const bundlePath = path.join(dir, "bundle.cjs");
 
   fs.writeFileSync(
     bundlePath,
     [
       'const React = require("react");',
-      'const { useMedia } = require("@notchapp/api");',
+      'const { useMedia } = require("@skylane/api");',
       "module.exports.default = function Widget() {",
       "  const media = useMedia();",
       '  return React.createElement("Text", null, media.isLoading ? "loading" : String(media.item?.title ?? "Nothing Playing"));',
@@ -357,14 +357,14 @@ test("runtime-v2 forwards host events to mounted workers so useMedia can update 
 });
 
 test("runtime-v2 exposes resolved preferences through usePreference and resyncs on prop updates", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-v2-preferences-");
+  const dir = createTempDir(t, "skylane-runtime-v2-preferences-");
   const bundlePath = path.join(dir, "bundle.cjs");
 
   fs.writeFileSync(
     bundlePath,
     [
       'const React = require("react");',
-      'const { usePreference } = require("@notchapp/api");',
+      'const { usePreference } = require("@skylane/api");',
       "module.exports.default = function Widget() {",
       '  const [mailbox] = usePreference("mailbox");',
       '  return React.createElement("Text", null, String(mailbox ?? "missing"));',
@@ -461,14 +461,14 @@ test("runtime-v2 exposes resolved preferences through usePreference and resyncs 
 });
 
 test("runtime-v2 exposes resolved theme through useTheme", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-v2-theme-");
+  const dir = createTempDir(t, "skylane-runtime-v2-theme-");
   const bundlePath = path.join(dir, "bundle.cjs");
 
   fs.writeFileSync(
     bundlePath,
     [
       'const React = require("react");',
-      'const { useTheme } = require("@notchapp/api");',
+      'const { useTheme } = require("@skylane/api");',
       "module.exports.default = function Widget() {",
       "  const theme = useTheme();",
       '  return React.createElement("Text", null, String(theme.colors?.accent ?? "missing"));',
@@ -569,14 +569,14 @@ test("runtime-v2 exposes resolved theme through useTheme", async (t) => {
 });
 
 test("runtime-v2 renders compound sdk components into the expected host tree", async (t) => {
-  const dir = createTempDir(t, "notch-runtime-v2-compound-");
+  const dir = createTempDir(t, "skylane-runtime-v2-compound-");
   const bundlePath = path.join(dir, "bundle.cjs");
 
   fs.writeFileSync(
     bundlePath,
     [
       'const React = require("react");',
-      'const { Card, CardContent, CardTitle, ToolbarButton } = require("@notchapp/api");',
+      'const { Card, CardContent, CardTitle, ToolbarButton } = require("@skylane/api");',
       "module.exports.default = function Widget() {",
       "  return React.createElement(",
       "    Card,",

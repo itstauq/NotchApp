@@ -49,7 +49,7 @@ jobs:
 
       - name: Commit and tag release metadata
         run: |
-          git add NotchApp.xcodeproj/project.pbxproj NotchApp/AppSettingsView.swift
+          git add Skylane.xcodeproj/project.pbxproj Skylane/AppSettingsView.swift
           git commit -m "Release ${{ steps.bump.outputs.tag }}"
           git tag "${{ steps.bump.outputs.tag }}"
 
@@ -112,7 +112,7 @@ jobs:
       - name: Upload packaged artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NotchApp-${{ needs.bump-version.outputs.version }}-dmg
+          name: Skylane-${{ needs.bump-version.outputs.version }}-dmg
           path: ${{ env.DMG_PATH }}
 
       - name: Create draft GitHub release

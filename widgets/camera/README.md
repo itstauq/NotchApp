@@ -1,8 +1,8 @@
 # Camera Preview
 
-Live camera widget for NotchApp.
+Live camera widget for Skylane.
 
-It uses the host-provided `Camera` primitive from `@notchapp/api`, so the
+It uses the host-provided `Camera` primitive from `@skylane/api`, so the
 widget itself only defines presentation:
 
 - rounded live preview surface
@@ -10,7 +10,7 @@ widget itself only defines presentation:
 - top-right and bottom corner action badges
 
 The actual camera access, permission flow, and native rendering are handled by
-the NotchApp host.
+the Skylane host.
 
 ## Notes
 

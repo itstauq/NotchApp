@@ -6,6 +6,6 @@
 .plan
 .DS_Store
 node_modules
-.notch
+.skylane
 
 *.log

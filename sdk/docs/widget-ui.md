@@ -17,7 +17,7 @@ import {
   DropdownMenu,
   DropdownMenuItem,
   DropdownMenuTriggerButton,
-} from "@notchapp/api";
+} from "@skylane/api";
 
 export default function Widget() {
   return (
@@ -88,7 +88,7 @@ import {
   ListItem,
   ListItemAction,
   ListItemTitle,
-} from "@notchapp/api";
+} from "@skylane/api";
 
 export default function Widget() {
   return (
@@ -126,7 +126,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTriggerButton,
   Overlay,
-} from "@notchapp/api";
+} from "@skylane/api";
 
 export default function Widget() {
   return (
@@ -158,7 +158,7 @@ For simple menus, prefer the `trigger` prop on `DropdownMenu`. Reach for `Dropdo
 Use `Toolbar` for dense transport controls and grouped actions.
 
 ```tsx
-import { Toolbar, ToolbarButton } from "@notchapp/api";
+import { Toolbar, ToolbarButton } from "@skylane/api";
 
 export default function Widget() {
   return (

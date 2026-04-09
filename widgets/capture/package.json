@@ -1,20 +1,20 @@
 {
-  "name": "@notchapp/widget-capture",
+  "name": "@skylane/widget-capture",
   "version": "0.1.1",
   "private": true,
   "scripts": {
-    "develop": "notchapp develop",
-    "build": "notchapp build",
-    "lint": "notchapp lint"
+    "develop": "skylane develop",
+    "build": "skylane build",
+    "lint": "skylane lint"
   },
   "devDependencies": {
-    "notchapp": "^0.1.1"
+    "skylane": "^0.1.1"
   },
   "dependencies": {
-    "@notchapp/api": "^0.1.1"
+    "@skylane/api": "^0.1.1"
   },
-  "notch": {
-    "id": "com.notchapp.capture",
+  "skylane": {
+    "id": "com.skylane.capture",
     "title": "Capture",
     "description": "Quickly capture thoughts and tasks",
     "icon": "square.and.pencil",

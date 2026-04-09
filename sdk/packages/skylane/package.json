@@ -1,0 +1,41 @@
+{
+  "name": "skylane",
+  "version": "0.1.1",
+  "description": "CLI for developing and building Skylane widgets",
+  "type": "module",
+  "bin": {
+    "skylane": "./bin/skylane.js"
+  },
+  "files": [
+    "bin",
+    "cli.mjs",
+    "security-policy.mjs"
+  ],
+  "keywords": [
+    "skylane",
+    "widgets",
+    "macos",
+    "cli",
+    "productivity"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/itstauq/Skylane.git",
+    "directory": "sdk/packages/skylane"
+  },
+  "homepage": "https://github.com/itstauq/Skylane#readme",
+  "bugs": {
+    "url": "https://github.com/itstauq/Skylane/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "acorn": "^8.15.0",
+    "esbuild": "^0.25.10"
+  }
+}
