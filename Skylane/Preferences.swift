@@ -184,7 +184,7 @@ enum Preferences {
     static var keyboardShortcutsEnabled: Bool {
         get {
             if UserDefaults.standard.object(forKey: keyboardShortcutsEnabledKey) == nil {
-                return false
+                return true
             }
 
             return UserDefaults.standard.bool(forKey: keyboardShortcutsEnabledKey)
