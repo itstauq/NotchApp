@@ -7,6 +7,7 @@ const { usePreference } = require("./hooks/usePreference");
 const { useCameras } = require("./hooks/useCameras");
 const { useMedia } = require("./hooks/useMedia");
 const { openURL } = require("./functions/openURL");
+const { scheduleNotification, cancelNotification } = require("./functions/notifications");
 const { LocalStorage } = require("./runtime");
 
 const OVERLAY_SLOT_TYPE = "__skylane_overlay";
@@ -1139,4 +1140,6 @@ module.exports = {
   useFetch,
   useTheme,
   openURL,
+  scheduleNotification,
+  cancelNotification,
 };

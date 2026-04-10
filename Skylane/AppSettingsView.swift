@@ -199,11 +199,13 @@ extension Notification.Name {
 private struct GeneralSettingsPage: View {
     @Binding var accentColor: AppAccentColor
     @ObservedObject private var appUpdater = AppUpdater.shared
+    @ObservedObject private var widgetNotificationService = WidgetNotificationService.shared
     @State private var launchAtLogin = Preferences.isLaunchAtLoginEnabled
     @State private var showMenuBarIcon = Preferences.isMenuBarIconEnabled
     @State private var openLaneOnHover = Preferences.openLaneMode == .hover
     @State private var hoverDelay = Preferences.hoverDelay
     @State private var rememberLastView = Preferences.rememberLastView
+    @State private var widgetNotificationsEnabled = Preferences.widgetNotificationsEnabled
     @State private var keyboardShortcutsEnabled = Preferences.keyboardShortcutsEnabled
     @State private var toggleLaneShortcut = Preferences.toggleLaneShortcut ?? .toggleLaneDefault
     @State private var hasToggleLaneShortcut = Preferences.toggleLaneShortcut != nil
@@ -347,6 +349,32 @@ private struct GeneralSettingsPage: View {
                 }
 
                 SettingsSection(
+                    title: "Notifications",
+                    symbolName: "bell.badge"
+                ) {
+                    SettingsToggleRow(
+                        title: "Enable widget notifications",
+                        subtitle: "Allow widgets that declare notification support to deliver macOS alerts.",
+                        isOn: Binding(
+                            get: { widgetNotificationsEnabled },
+                            set: {
+                                widgetNotificationsEnabled = $0
+                                Preferences.widgetNotificationsEnabled = $0
+                            }
+                        )
+                    )
+
+                    SettingsValueRow(
+                        title: "Permission",
+                        value: widgetNotificationPermissionLabel
+                    )
+
+                    SettingsDescriptionRow(
+                        text: widgetNotificationService.authorizationStatus.description
+                    )
+                }
+
+                SettingsSection(
                     title: "Shortcuts",
                     symbolName: "command"
                 ) {
@@ -391,17 +419,36 @@ private struct GeneralSettingsPage: View {
                 hasToggleLaneShortcut = false
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .widgetNotificationsPreferenceDidChange)) { _ in
+            widgetNotificationsEnabled = Preferences.widgetNotificationsEnabled
+        }
+        .task {
+            await widgetNotificationService.refreshAuthorizationStatus()
+        }
+    }
+
+    private var widgetNotificationPermissionLabel: String {
+        switch widgetNotificationService.authorizationStatus {
+        case .authorized:
+            return "Allowed"
+        case .denied:
+            return "Denied"
+        case .notDetermined:
+            return "Not Yet Requested"
+        }
     }
 }
 
 private struct WidgetsSettingsPage: View {
     var accentColor: AppAccentColor
 
+    @ObservedObject private var widgetNotificationService = WidgetNotificationService.shared
     private let preferenceStore = WidgetStorageManager(log: { _ in })
     @State private var snapshot = WidgetSettingsSnapshot.empty
     @State private var selectedViewID: UUID?
     @State private var selectedWidgetID: UUID?
     @State private var selectedPreferenceValues: [String: RuntimeJSONValue] = [:]
+    @State private var selectedNotificationsEnabled = false
 
     private var selectedView: WidgetSettingsSnapshot.ViewSection? {
         guard let selectedViewID else { return snapshot.views.first }
@@ -444,6 +491,16 @@ private struct WidgetsSettingsPage: View {
 
                     if let selectedItem {
                         VStack(spacing: 18) {
+                            if selectedItem.supportsNotifications {
+                                WidgetNotificationsSection(
+                                    item: selectedItem,
+                                    isEnabled: $selectedNotificationsEnabled,
+                                    authorizationStatus: widgetNotificationService.authorizationStatus,
+                                    globalNotificationsEnabled: Preferences.widgetNotificationsEnabled,
+                                    onSetEnabled: saveNotificationsEnabled
+                                )
+                            }
+
                             WidgetConfigurationSection(
                                 item: selectedItem,
                                 preferenceValues: $selectedPreferenceValues,
@@ -532,6 +589,7 @@ private struct WidgetsSettingsPage: View {
     private func loadSelectedPreferenceValues() {
         guard let selectedItem else {
             selectedPreferenceValues = [:]
+            selectedNotificationsEnabled = false
             return
         }
         var resolvedValues = preferenceStore.resolvedPreferenceValues(
@@ -555,6 +613,7 @@ private struct WidgetsSettingsPage: View {
             }
         }
         selectedPreferenceValues = resolvedValues
+        selectedNotificationsEnabled = resolvedNotificationsEnabled(for: selectedItem)
     }
 
     private func savePreferenceValue(name: String, value: RuntimeJSONValue?) {
@@ -578,6 +637,30 @@ private struct WidgetsSettingsPage: View {
         }
     }
 
+    private func saveNotificationsEnabled(_ isEnabled: Bool) {
+        guard let selectedItem, selectedItem.supportsNotifications else { return }
+
+        do {
+            try preferenceStore.setNotificationsEnabled(
+                widgetID: selectedItem.widgetID,
+                instanceID: selectedItem.id.uuidString,
+                enabled: isEnabled ? nil : false
+            )
+            selectedNotificationsEnabled = isEnabled
+
+            if !isEnabled {
+                Task {
+                    await WidgetNotificationService.shared.cancelAllNotifications(
+                        widgetID: selectedItem.widgetID,
+                        instanceID: selectedItem.id.uuidString
+                    )
+                }
+            }
+        } catch {
+            selectedNotificationsEnabled = resolvedNotificationsEnabled(for: selectedItem)
+        }
+    }
+
     @MainActor
     private func applyPendingWidgetSelectionIfNeeded() {
         guard let instanceID = AppSettingsWindow.consumeRequestedWidgetInstanceID() else { return }
@@ -597,6 +680,18 @@ private struct WidgetsSettingsPage: View {
         case .camera:
             return .camera
         }
+    }
+
+    private func resolvedNotificationsEnabled(for item: WidgetSettingsSnapshot.Item) -> Bool {
+        guard item.supportsNotifications else {
+            return false
+        }
+
+        return preferenceStore.notificationsEnabled(
+            widgetID: item.widgetID,
+            instanceID: item.id.uuidString,
+            defaultValue: true
+        )
     }
 }
 
@@ -820,6 +915,56 @@ private struct WidgetSelectionPreviewCard: View {
             .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct WidgetNotificationsSection: View {
+    var item: WidgetSettingsSnapshot.Item
+    @Binding var isEnabled: Bool
+    var authorizationStatus: WidgetNotificationAuthorizationStatus
+    var globalNotificationsEnabled: Bool
+    var onSetEnabled: (Bool) -> Void
+
+    var body: some View {
+        SettingsSection(
+            title: "Notifications",
+            symbolName: "bell.badge"
+        ) {
+            SettingsToggleRow(
+                title: "Enable notifications",
+                subtitle: "Allow this widget instance to deliver macOS alerts.",
+                isOn: Binding(
+                    get: { isEnabled },
+                    set: { nextValue in
+                        isEnabled = nextValue
+                        onSetEnabled(nextValue)
+                    }
+                )
+            )
+
+            if !globalNotificationsEnabled {
+                SettingsDescriptionRow(
+                    text: "Widget notifications are turned off globally. Re-enable them from General settings to allow delivery."
+                )
+            } else {
+                SettingsValueRow(
+                    title: "Permission",
+                    value: permissionLabel
+                )
+                SettingsDescriptionRow(text: authorizationStatus.description)
+            }
+        }
+    }
+
+    private var permissionLabel: String {
+        switch authorizationStatus {
+        case .authorized:
+            return "Allowed"
+        case .denied:
+            return "Denied"
+        case .notDetermined:
+            return "Not Yet Requested"
+        }
     }
 }
 
@@ -1185,6 +1330,7 @@ private struct WidgetSettingsSnapshot {
         var startColumn: Int
         var span: Int
         var tint: Color
+        var supportsNotifications: Bool
         var preferences: [WidgetPreferenceDefinition]
 
         func missingRequiredPreferenceNames(given values: [String: RuntimeJSONValue]) -> [String] {
@@ -1230,6 +1376,7 @@ private struct WidgetSettingsSnapshot {
                         startColumn: widget.startColumn,
                         span: widget.span,
                         tint: definition.tint,
+                        supportsNotifications: definition.supportsNotifications,
                         preferences: definition.preferences
                     )
                 }

@@ -36,6 +36,7 @@ struct WidgetStoragePreferenceDefinition {
 }
 
 private let widgetPreferenceStorageKeyPrefix = "__widgetPreference__:"
+private let widgetNotificationStorageKeyPrefix = "__widgetNotification__:"
 
 final class WidgetStorageManager {
     private let fileManager: FileManager
@@ -102,6 +103,52 @@ final class WidgetStorageManager {
                     instanceID: instanceID,
                     key: storageKey,
                     value: value
+                )
+            } else {
+                try storageEngine.removeItem(
+                    widgetID: widgetID,
+                    instanceID: instanceID,
+                    key: storageKey
+                )
+            }
+        }
+    }
+
+    func notificationsEnabled(
+        widgetID: String,
+        instanceID: String,
+        defaultValue: Bool
+    ) -> Bool {
+        queue.sync {
+            do {
+                if let value = try storageEngine.item(
+                    widgetID: widgetID,
+                    instanceID: instanceID,
+                    key: notificationStorageKey(for: "enabled")
+                )?.boolValue {
+                    return value
+                }
+            } catch {
+                log("Widget notifications: failed to load state for \(widgetID)/\(instanceID): \(error.localizedDescription)")
+            }
+
+            return defaultValue
+        }
+    }
+
+    func setNotificationsEnabled(
+        widgetID: String,
+        instanceID: String,
+        enabled: Bool?
+    ) throws {
+        let storageKey = notificationStorageKey(for: "enabled")
+        try queue.sync {
+            if let enabled {
+                try storageEngine.setItem(
+                    widgetID: widgetID,
+                    instanceID: instanceID,
+                    key: storageKey,
+                    value: .bool(enabled)
                 )
             } else {
                 try storageEngine.removeItem(
@@ -207,22 +254,26 @@ final class WidgetStorageManager {
         "\(widgetPreferenceStorageKeyPrefix)\(name)"
     }
 
+    private func notificationStorageKey(for name: String) -> String {
+        "\(widgetNotificationStorageKeyPrefix)\(name)"
+    }
+
     private func filteredLocalStorageItems(_ items: [String: RuntimeJSONValue]) -> [String: RuntimeJSONValue] {
-        items.filter { !isReservedPreferenceStorageKey($0.key) }
+        items.filter { !isReservedHostStorageKey($0.key) }
     }
 
     private func validateLocalStorageKey(_ key: String) throws {
-        guard !isReservedPreferenceStorageKey(key) else {
+        guard !isReservedHostStorageKey(key) else {
             throw RuntimeTransportRPCError(
                 code: -32602,
-                message: "LocalStorage key '\(key)' uses a reserved preferences namespace.",
+                message: "LocalStorage key '\(key)' uses a reserved Skylane host namespace.",
                 data: nil
             )
         }
     }
 
-    private func isReservedPreferenceStorageKey(_ key: String) -> Bool {
-        key.hasPrefix(widgetPreferenceStorageKeyPrefix)
+    private func isReservedHostStorageKey(_ key: String) -> Bool {
+        key.hasPrefix(widgetPreferenceStorageKeyPrefix) || key.hasPrefix(widgetNotificationStorageKeyPrefix)
     }
 
     private static func defaultRootURL() -> URL {

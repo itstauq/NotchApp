@@ -1,9 +1,58 @@
 import Foundation
 import XCTest
 import CryptoKit
+import UserNotifications
 
 @MainActor
 final class WidgetHostAPITests: XCTestCase {
+    func testWidgetManifestDecodesNotificationCapabilityFromCapabilitiesBlock() throws {
+        let data = Data(
+            """
+            {
+              "name": "@skylane/widget-demo",
+              "version": "0.1.0",
+              "skylane": {
+                "id": "demo.widget",
+                "title": "Demo",
+                "icon": "bell",
+                "minSpan": 3,
+                "maxSpan": 6,
+                "capabilities": {
+                  "notifications": {}
+                }
+              }
+            }
+            """.utf8
+        )
+
+        let manifest = try JSONDecoder().decode(WidgetManifest.self, from: data)
+
+        XCTAssertNotNil(manifest.skylane.capabilities?.notifications)
+    }
+
+    func testWidgetManifestStillDecodesLegacyNotificationAlias() throws {
+        let data = Data(
+            """
+            {
+              "name": "@skylane/widget-demo",
+              "version": "0.1.0",
+              "skylane": {
+                "id": "demo.widget",
+                "title": "Demo",
+                "icon": "bell",
+                "minSpan": 3,
+                "maxSpan": 6,
+                "notifications": {}
+              }
+            }
+            """.utf8
+        )
+
+        let manifest = try JSONDecoder().decode(WidgetManifest.self, from: data)
+
+        XCTAssertNotNil(manifest.skylane.resolvedCapabilities?.notifications)
+    }
+
     func testNetworkServiceRejectsFileURLs() async {
         let service = WidgetHostNetworkService(
             makeDataTask: { _, _ in
@@ -972,6 +1021,296 @@ final class WidgetHostAPITests: XCTestCase {
         XCTAssertTrue(openedBundleIdentifiers.isEmpty)
     }
 
+    func testHandleRoutesNotificationScheduleRPCThroughWidgetHostAPI() async throws {
+        let sessionManager = WidgetSessionManager()
+        let storage = TestStorageHandler(result: .null)
+        let network = TestNetworkHandler()
+        let notifications = TestNotificationHandler()
+        let instanceID = UUID()
+        let definition = makeWidgetDefinition(id: "demo.widget", supportsNotifications: true)
+        sessionManager.beginMount(instanceID: instanceID)
+
+        let deliverAtMs = Date(timeIntervalSince1970: 1_800_000_000).timeIntervalSince1970 * 1000
+        let api = WidgetHostAPI(
+            sessionManager: sessionManager,
+            storage: storage,
+            network: network,
+            notifications: notifications,
+            resolveWidgetID: { id in
+                id == instanceID ? "demo.widget" : nil
+            },
+            resolveWidgetDefinition: { id in
+                id == instanceID ? definition : nil
+            }
+        )
+
+        let response = try await api.handle(
+            RuntimeTransportRequest(
+                id: "1",
+                method: "rpc",
+                params: .object([
+                    "instanceId": .string(instanceID.uuidString),
+                    "sessionId": .string("session-1"),
+                    "method": .string("notifications.schedule"),
+                    "params": .object([
+                        "id": .string("phase-complete"),
+                        "title": .string("Focus complete"),
+                        "body": .string("Time for a break."),
+                        "deliverAtMs": .number(deliverAtMs)
+                    ])
+                ])
+            )
+        )
+
+        XCTAssertEqual(
+            response,
+            .object([
+                "sessionId": .string("session-1"),
+                "value": .null
+            ])
+        )
+        XCTAssertEqual(notifications.scheduledRequests.count, 1)
+        XCTAssertEqual(
+            notifications.scheduledRequests.first,
+            WidgetHostNotificationRequest(
+                widgetID: "demo.widget",
+                instanceID: instanceID.uuidString,
+                notificationID: "phase-complete",
+                title: "Focus complete",
+                body: "Time for a break.",
+                deliverAt: Date(timeIntervalSince1970: deliverAtMs / 1000)
+            )
+        )
+    }
+
+    func testHandleRejectsNotificationScheduleForUndeclaredWidgets() async {
+        let sessionManager = WidgetSessionManager()
+        let storage = TestStorageHandler(result: .null)
+        let network = TestNetworkHandler()
+        let notifications = TestNotificationHandler()
+        let instanceID = UUID()
+        let definition = makeWidgetDefinition(id: "demo.widget", supportsNotifications: false)
+        sessionManager.beginMount(instanceID: instanceID)
+
+        let api = WidgetHostAPI(
+            sessionManager: sessionManager,
+            storage: storage,
+            network: network,
+            notifications: notifications,
+            resolveWidgetID: { id in
+                id == instanceID ? "demo.widget" : nil
+            },
+            resolveWidgetDefinition: { id in
+                id == instanceID ? definition : nil
+            }
+        )
+
+        do {
+            _ = try await api.handle(
+                RuntimeTransportRequest(
+                    id: "1",
+                    method: "rpc",
+                    params: .object([
+                        "instanceId": .string(instanceID.uuidString),
+                        "sessionId": .string("session-1"),
+                        "method": .string("notifications.schedule"),
+                        "params": .object([
+                            "id": .string("phase-complete"),
+                            "title": .string("Focus complete"),
+                            "deliverAtMs": .number(1_800_000_000_000)
+                        ])
+                    ])
+                )
+            )
+            XCTFail("Expected undeclared widget notifications to be rejected")
+        } catch let error as RuntimeTransportRPCError {
+            XCTAssertEqual(error.code, -32030)
+            XCTAssertTrue(notifications.scheduledRequests.isEmpty)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testHandleSkipsNotificationScheduleWhenInstanceNotificationsAreDisabled() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let sessionManager = WidgetSessionManager()
+        let storage = WidgetStorageManager(
+            fileManager: .default,
+            rootURL: rootURL,
+            secretProvider: TestWidgetHostStorageSecretProvider(),
+            encryptionEnabled: false,
+            log: { _ in }
+        )
+        let network = TestNetworkHandler()
+        let notifications = TestNotificationHandler()
+        let instanceID = UUID()
+        let definition = makeWidgetDefinition(id: "demo.widget", supportsNotifications: true)
+        sessionManager.beginMount(instanceID: instanceID)
+        try storage.setNotificationsEnabled(
+            widgetID: "demo.widget",
+            instanceID: instanceID.uuidString,
+            enabled: false
+        )
+
+        let previousGlobalSetting = Preferences.widgetNotificationsEnabled
+        defer { Preferences.widgetNotificationsEnabled = previousGlobalSetting }
+        Preferences.widgetNotificationsEnabled = true
+
+        let api = WidgetHostAPI(
+            sessionManager: sessionManager,
+            storage: storage,
+            network: network,
+            notifications: notifications,
+            resolveWidgetID: { id in
+                id == instanceID ? "demo.widget" : nil
+            },
+            resolveWidgetDefinition: { id in
+                id == instanceID ? definition : nil
+            }
+        )
+
+        _ = try await api.handle(
+            RuntimeTransportRequest(
+                id: "1",
+                method: "rpc",
+                params: .object([
+                    "instanceId": .string(instanceID.uuidString),
+                    "sessionId": .string("session-1"),
+                    "method": .string("notifications.schedule"),
+                    "params": .object([
+                        "id": .string("phase-complete"),
+                        "title": .string("Focus complete"),
+                        "deliverAtMs": .number(1_800_000_000_000)
+                    ])
+                ])
+            )
+        )
+
+        XCTAssertTrue(notifications.scheduledRequests.isEmpty)
+        XCTAssertEqual(notifications.cancelAllCalls.count, 1)
+        XCTAssertEqual(notifications.cancelAllCalls.first?.widgetID, "demo.widget")
+        XCTAssertEqual(notifications.cancelAllCalls.first?.instanceID, instanceID.uuidString)
+    }
+
+    func testNotificationServiceRequestsAuthorizationAndSchedulesSilentNotifications() async throws {
+        let center = TestNotificationCenter(
+            authorizationStatuses: [.notDetermined, .authorized],
+            requestAuthorizationResult: true
+        )
+        let service = WidgetNotificationService(center: center, log: { _ in })
+
+        try await service.schedule(
+            WidgetHostNotificationRequest(
+                widgetID: "demo.widget",
+                instanceID: UUID().uuidString,
+                notificationID: "phase-complete",
+                title: "Focus complete",
+                body: "Time for a break.",
+                deliverAt: Date(timeIntervalSinceNow: 60)
+            )
+        )
+
+        XCTAssertEqual(center.requestedAuthorizationOptions, [.alert])
+        XCTAssertEqual(center.addedRequests.count, 1)
+        XCTAssertNil(center.addedRequests[0].content.sound)
+        XCTAssertEqual(center.addedRequests[0].content.title, "Focus complete")
+        XCTAssertEqual(center.addedRequests[0].content.body, "Time for a break.")
+        XCTAssertEqual(service.authorizationStatus, .authorized)
+    }
+
+    func testNotificationServiceDoesNotScheduleWhenAuthorizationIsDenied() async throws {
+        let center = TestNotificationCenter(authorizationStatuses: [.denied])
+        let service = WidgetNotificationService(center: center, log: { _ in })
+
+        try await service.schedule(
+            WidgetHostNotificationRequest(
+                widgetID: "demo.widget",
+                instanceID: UUID().uuidString,
+                notificationID: "phase-complete",
+                title: "Focus complete",
+                body: nil,
+                deliverAt: Date(timeIntervalSinceNow: 60)
+            )
+        )
+
+        XCTAssertTrue(center.addedRequests.isEmpty)
+        XCTAssertEqual(service.authorizationStatus, .denied)
+    }
+
+    func testNotificationServiceSuppressesForegroundPresentationWhenWidgetIsVisible() {
+        let center = TestNotificationCenter(authorizationStatuses: [.authorized])
+        let instanceID = UUID()
+        let service = WidgetNotificationService(
+            center: center,
+            log: { _ in },
+            isWidgetVisible: { id in id == instanceID }
+        )
+
+        XCTAssertEqual(service.presentationOptions(for: instanceID, appIsActive: true), [])
+        XCTAssertEqual(service.presentationOptions(for: instanceID, appIsActive: false), [.banner, .list])
+        XCTAssertEqual(service.presentationOptions(for: nil, appIsActive: true), [.banner, .list])
+    }
+
+    func testNotificationServiceActivatesTheTargetWidgetInstance() {
+        let center = TestNotificationCenter(authorizationStatuses: [.authorized])
+        let instanceID = UUID()
+        var activatedInstanceID: UUID?
+        let service = WidgetNotificationService(
+            center: center,
+            log: { _ in },
+            openWidget: { activatedInstanceID = $0 }
+        )
+
+        service.handleNotificationActivation(instanceID: instanceID)
+
+        XCTAssertEqual(activatedInstanceID, instanceID)
+    }
+
+    func testNotificationServiceCancelsManagedNotificationsOnLaunchWhenGlobalNotificationsAreDisabled() async {
+        let previousGlobalSetting = Preferences.widgetNotificationsEnabled
+        defer { Preferences.widgetNotificationsEnabled = previousGlobalSetting }
+        Preferences.widgetNotificationsEnabled = false
+
+        let center = TestNotificationCenter(authorizationStatuses: [.authorized])
+        center.pendingRequests = [
+            UNNotificationRequest(
+                identifier: "skylane.widget.\(UUID().uuidString)|phase-complete",
+                content: UNMutableNotificationContent(),
+                trigger: nil
+            ),
+            UNNotificationRequest(
+                identifier: "other.notification",
+                content: UNMutableNotificationContent(),
+                trigger: nil
+            )
+        ]
+
+        let service = WidgetNotificationService(center: center, log: { _ in })
+        _ = service
+
+        await waitUntil("managed notifications to be cleared on launch") {
+            center.pendingRequests.map(\.identifier) == ["other.notification"]
+        }
+    }
+
+    func testNotificationServiceRefreshesAuthorizationStatusWhenAppBecomesActive() async {
+        let center = TestNotificationCenter(authorizationStatuses: [.denied, .authorized])
+        let service = WidgetNotificationService(center: center, log: { _ in })
+
+        await waitUntil("initial notification authorization status") {
+            service.authorizationStatus == .denied
+        }
+
+        NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+
+        await waitUntil("notification authorization refresh after app activation") {
+            service.authorizationStatus == .authorized
+        }
+    }
+
     func testHandleRejectsUnknownWidgetHostRPCMethod() async {
         let sessionManager = WidgetSessionManager()
         let storage = TestStorageHandler(result: .null)
@@ -1183,9 +1522,127 @@ private final class TestNetworkHandler: WidgetHostNetworkHandling {
     }
 }
 
+@MainActor
+private final class TestNotificationHandler: WidgetHostNotificationHandling {
+    var authorizationStatus: WidgetNotificationAuthorizationStatus = .authorized
+    var scheduledRequests: [WidgetHostNotificationRequest] = []
+    var cancelCalls: [(widgetID: String, instanceID: String, notificationID: String)] = []
+    var cancelAllCalls: [(widgetID: String, instanceID: String)] = []
+
+    func refreshAuthorizationStatus() async {}
+
+    func schedule(_ request: WidgetHostNotificationRequest) async throws {
+        scheduledRequests.append(request)
+    }
+
+    func cancel(widgetID: String, instanceID: String, notificationID: String) async {
+        cancelCalls.append((widgetID, instanceID, notificationID))
+    }
+
+    func cancelAllNotifications(widgetID: String, instanceID: String) async {
+        cancelAllCalls.append((widgetID, instanceID))
+    }
+
+    func cancelAllManagedNotifications() async {}
+}
+
+private final class TestNotificationCenter: WidgetUserNotificationCenterHandling {
+    var delegate: UNUserNotificationCenterDelegate?
+    var authorizationStatuses: [UNAuthorizationStatus]
+    var requestAuthorizationResult: Bool
+    var requestedAuthorizationOptions: UNAuthorizationOptions?
+    var addedRequests: [UNNotificationRequest] = []
+    var pendingRequests: [UNNotificationRequest] = []
+    var deliveredNotificationsStore: [UNNotification] = []
+
+    init(
+        authorizationStatuses: [UNAuthorizationStatus],
+        requestAuthorizationResult: Bool = false
+    ) {
+        self.authorizationStatuses = authorizationStatuses
+        self.requestAuthorizationResult = requestAuthorizationResult
+    }
+
+    func notificationAuthorizationStatus() async -> UNAuthorizationStatus {
+        if authorizationStatuses.count > 1 {
+            return authorizationStatuses.removeFirst()
+        }
+
+        return authorizationStatuses.first ?? .notDetermined
+    }
+
+    func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool {
+        requestedAuthorizationOptions = options
+        return requestAuthorizationResult
+    }
+
+    func add(_ request: UNNotificationRequest) async throws {
+        addedRequests.append(request)
+        pendingRequests.append(request)
+    }
+
+    func removePendingNotificationRequests(withIdentifiers identifiers: [String]) {
+        pendingRequests.removeAll { identifiers.contains($0.identifier) }
+    }
+
+    func removeDeliveredNotifications(withIdentifiers identifiers: [String]) {
+        deliveredNotificationsStore.removeAll { identifiers.contains($0.request.identifier) }
+    }
+
+    func pendingNotificationRequests() async -> [UNNotificationRequest] {
+        pendingRequests
+    }
+
+    func deliveredNotifications() async -> [UNNotification] {
+        deliveredNotificationsStore
+    }
+}
+
+@MainActor
+private func waitUntil(
+    _ description: String,
+    timeoutNanoseconds: UInt64 = 1_000_000_000,
+    condition: @escaping () -> Bool
+) async {
+    let deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
+    while !condition() {
+        if DispatchTime.now().uptimeNanoseconds >= deadline {
+            XCTFail("Timed out waiting for \(description)")
+            return
+        }
+        await Task.yield()
+    }
+}
+
 private struct DecodedRPCResponse<Value: Decodable>: Decodable {
     var sessionId: String
     var value: Value
+}
+
+private func makeWidgetDefinition(
+    id: String,
+    supportsNotifications: Bool
+) -> WidgetDefinition {
+    WidgetDefinition(
+        id: id,
+        title: "Demo",
+        icon: "bell",
+        description: "Demo widget",
+        theme: .blue,
+        capabilities: supportsNotifications
+            ? WidgetCapabilitiesDefinition(notifications: WidgetNotificationCapabilityDefinition())
+            : nil,
+        minSpan: 3,
+        maxSpan: 6,
+        package: WidgetPackage(
+            id: id,
+            version: "0.1.0",
+            directoryPath: "/tmp/\(id)",
+            manifestPath: "/tmp/\(id)/package.json"
+        ),
+        entryFilePath: "/tmp/\(id)/src/index.tsx",
+        preferences: []
+    )
 }
 
 private func makeMediaAdapterSnapshot(
@@ -1277,5 +1734,15 @@ private final class TestMediaHandler: WidgetHostMediaHandling {
 
     func openSourceApp() async throws {
         invokedMethods.append("openSourceApp")
+    }
+}
+
+private struct TestWidgetHostStorageSecretProvider: WidgetStorageSecretProviding {
+    func masterKey() throws -> Data {
+        Data(repeating: 0x42, count: 32)
+    }
+
+    func key(for widgetID: String) throws -> Data {
+        Data(widgetID.utf8)
     }
 }

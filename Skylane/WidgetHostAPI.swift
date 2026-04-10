@@ -1,5 +1,7 @@
 import AppKit
+import Combine
 import Foundation
+import UserNotifications
 
 private let cameraDevicePreferenceName = "cameraDeviceId"
 
@@ -22,6 +24,17 @@ struct RuntimeFetchResponsePayload: Encodable, Equatable {
 
 struct RuntimeCancelRequestParams: Decodable {
     var requestId: String
+}
+
+struct RuntimeScheduleNotificationParams: Decodable {
+    var id: String
+    var title: String
+    var body: String?
+    var deliverAtMs: Double
+}
+
+struct RuntimeCancelNotificationParams: Decodable {
+    var id: String
 }
 
 struct RuntimeBrowserOpenParams: Decodable {
@@ -1551,12 +1564,352 @@ final class WidgetHostMediaService: WidgetHostMediaHandling {
 }
 
 @MainActor
+struct WidgetHostNotificationRequest: Equatable {
+    var widgetID: String
+    var instanceID: String
+    var notificationID: String
+    var title: String
+    var body: String?
+    var deliverAt: Date
+}
+
+enum WidgetNotificationAuthorizationStatus: String {
+    case notDetermined
+    case denied
+    case authorized
+
+    var description: String {
+        switch self {
+        case .notDetermined:
+            return "Skylane will request notification permission the first time a widget tries to notify you."
+        case .denied:
+            return "Notifications are currently denied. Enable them for Skylane in System Settings > Notifications."
+        case .authorized:
+            return "Skylane can deliver widget notifications through macOS."
+        }
+    }
+
+    var canDeliverNotifications: Bool {
+        self == .authorized
+    }
+}
+
+@MainActor
+protocol WidgetHostNotificationHandling: AnyObject {
+    var authorizationStatus: WidgetNotificationAuthorizationStatus { get }
+    func refreshAuthorizationStatus() async
+    func schedule(_ request: WidgetHostNotificationRequest) async throws
+    func cancel(widgetID: String, instanceID: String, notificationID: String) async
+    func cancelAllNotifications(widgetID: String, instanceID: String) async
+    func cancelAllManagedNotifications() async
+}
+
+protocol WidgetUserNotificationCenterHandling: AnyObject {
+    var delegate: UNUserNotificationCenterDelegate? { get set }
+    func notificationAuthorizationStatus() async -> UNAuthorizationStatus
+    func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool
+    func add(_ request: UNNotificationRequest) async throws
+    func removePendingNotificationRequests(withIdentifiers identifiers: [String])
+    func removeDeliveredNotifications(withIdentifiers identifiers: [String])
+    func pendingNotificationRequests() async -> [UNNotificationRequest]
+    func deliveredNotifications() async -> [UNNotification]
+}
+
+extension UNUserNotificationCenter: WidgetUserNotificationCenterHandling {
+    func notificationAuthorizationStatus() async -> UNAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            getNotificationSettings { settings in
+                continuation.resume(returning: settings.authorizationStatus)
+            }
+        }
+    }
+
+    func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool {
+        try await withCheckedThrowingContinuation { continuation in
+            requestAuthorization(options: options) { granted, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: granted)
+                }
+            }
+        }
+    }
+
+    func add(_ request: UNNotificationRequest) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            add(request) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
+        }
+    }
+
+    func pendingNotificationRequests() async -> [UNNotificationRequest] {
+        await withCheckedContinuation { continuation in
+            getPendingNotificationRequests { requests in
+                continuation.resume(returning: requests)
+            }
+        }
+    }
+
+    func deliveredNotifications() async -> [UNNotification] {
+        await withCheckedContinuation { continuation in
+            getDeliveredNotifications { notifications in
+                continuation.resume(returning: notifications)
+            }
+        }
+    }
+}
+
+@MainActor
+final class WidgetNotificationService: NSObject, ObservableObject, WidgetHostNotificationHandling, UNUserNotificationCenterDelegate {
+    static let shared = WidgetNotificationService()
+
+    @Published private(set) var authorizationStatus: WidgetNotificationAuthorizationStatus = .notDetermined
+
+    private let center: WidgetUserNotificationCenterHandling
+    private let log: (String) -> Void
+    private var preferencesObserver: NSObjectProtocol?
+    private var appDidBecomeActiveObserver: NSObjectProtocol?
+
+    var openWidget: (UUID?) -> Void
+    var isWidgetVisible: (UUID) -> Bool
+
+    private static let identifierPrefix = "skylane.widget."
+    private static let userInfoInstanceIDKey = "widgetInstanceId"
+    private static let userInfoWidgetIDKey = "widgetId"
+    private static let userInfoNotificationIDKey = "notificationId"
+
+    init(
+        center: WidgetUserNotificationCenterHandling = UNUserNotificationCenter.current(),
+        log: @escaping (String) -> Void = { FileLog().write($0) },
+        openWidget: @escaping (UUID?) -> Void = { _ in },
+        isWidgetVisible: @escaping (UUID) -> Bool = { _ in false }
+    ) {
+        self.center = center
+        self.log = log
+        self.openWidget = openWidget
+        self.isWidgetVisible = isWidgetVisible
+        super.init()
+
+        center.delegate = self
+        preferencesObserver = NotificationCenter.default.addObserver(
+            forName: .widgetNotificationsPreferenceDidChange,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if !Preferences.widgetNotificationsEnabled {
+                    await self.cancelAllManagedNotifications()
+                }
+            }
+        }
+
+        appDidBecomeActiveObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.refreshAuthorizationStatus()
+            }
+        }
+
+        Task { @MainActor [weak self] in
+            await self?.synchronizeWithSystemState()
+        }
+    }
+
+    deinit {
+        if let preferencesObserver {
+            NotificationCenter.default.removeObserver(preferencesObserver)
+        }
+        if let appDidBecomeActiveObserver {
+            NotificationCenter.default.removeObserver(appDidBecomeActiveObserver)
+        }
+    }
+
+    func refreshAuthorizationStatus() async {
+        authorizationStatus = mappedAuthorizationStatus(from: await center.notificationAuthorizationStatus())
+    }
+
+    func schedule(_ request: WidgetHostNotificationRequest) async throws {
+        let authorizationStatus = try await ensureAuthorizationForDelivery()
+        guard authorizationStatus.canDeliverNotifications else {
+            log("Widget notifications: skipped scheduling \(request.widgetID)/\(request.instanceID) because authorization is \(authorizationStatus.rawValue).")
+            return
+        }
+
+        let content = UNMutableNotificationContent()
+        content.title = request.title
+        if let body = request.body?.trimmingCharacters(in: .whitespacesAndNewlines), !body.isEmpty {
+            content.body = body
+        }
+        content.userInfo = [
+            Self.userInfoInstanceIDKey: request.instanceID,
+            Self.userInfoWidgetIDKey: request.widgetID,
+            Self.userInfoNotificationIDKey: request.notificationID
+        ]
+
+        let notificationRequest = UNNotificationRequest(
+            identifier: notificationRequestIdentifier(
+                instanceID: request.instanceID,
+                notificationID: request.notificationID
+            ),
+            content: content,
+            trigger: notificationTrigger(for: request.deliverAt)
+        )
+        try await center.add(notificationRequest)
+    }
+
+    func cancel(widgetID: String, instanceID: String, notificationID: String) async {
+        let identifier = notificationRequestIdentifier(instanceID: instanceID, notificationID: notificationID)
+        center.removePendingNotificationRequests(withIdentifiers: [identifier])
+        center.removeDeliveredNotifications(withIdentifiers: [identifier])
+    }
+
+    func cancelAllNotifications(widgetID: String, instanceID: String) async {
+        let identifiers = await managedNotificationIdentifiers(instanceID: instanceID)
+        guard !identifiers.isEmpty else { return }
+        center.removePendingNotificationRequests(withIdentifiers: identifiers)
+        center.removeDeliveredNotifications(withIdentifiers: identifiers)
+    }
+
+    func cancelAllManagedNotifications() async {
+        let identifiers = await managedNotificationIdentifiers(instanceID: nil)
+        guard !identifiers.isEmpty else { return }
+        center.removePendingNotificationRequests(withIdentifiers: identifiers)
+        center.removeDeliveredNotifications(withIdentifiers: identifiers)
+    }
+
+    private func synchronizeWithSystemState() async {
+        await refreshAuthorizationStatus()
+        if !Preferences.widgetNotificationsEnabled {
+            await cancelAllManagedNotifications()
+        }
+    }
+
+    private func ensureAuthorizationForDelivery() async throws -> WidgetNotificationAuthorizationStatus {
+        let currentStatus = mappedAuthorizationStatus(from: await center.notificationAuthorizationStatus())
+        authorizationStatus = currentStatus
+
+        guard currentStatus == .notDetermined else {
+            return currentStatus
+        }
+
+        do {
+            _ = try await center.requestAuthorization(options: [.alert])
+        } catch {
+            log("Widget notifications: authorization request failed: \(error.localizedDescription)")
+        }
+
+        await refreshAuthorizationStatus()
+        return authorizationStatus
+    }
+
+    private func notificationRequestIdentifier(instanceID: String, notificationID: String) -> String {
+        "\(Self.identifierPrefix)\(instanceID)|\(notificationID)"
+    }
+
+    private func notificationTrigger(for deliverAt: Date) -> UNNotificationTrigger {
+        let interval = deliverAt.timeIntervalSinceNow
+        if interval <= 1 {
+            return UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
+        }
+
+        let components = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute, .second],
+            from: deliverAt
+        )
+        return UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+    }
+
+    private func managedNotificationIdentifiers(instanceID: String?) async -> [String] {
+        let pending = (await center.pendingNotificationRequests()).map(\.identifier)
+        let delivered = (await center.deliveredNotifications()).map(\.request.identifier)
+        let allIdentifiers = Set(pending + delivered)
+
+        return Array(allIdentifiers.filter { identifier in
+            guard identifier.hasPrefix(Self.identifierPrefix) else {
+                return false
+            }
+            guard let instanceID else {
+                return true
+            }
+            return identifier.hasPrefix("\(Self.identifierPrefix)\(instanceID)|")
+        })
+    }
+
+    private func mappedAuthorizationStatus(from status: UNAuthorizationStatus) -> WidgetNotificationAuthorizationStatus {
+        switch status {
+        case .authorized, .ephemeral, .provisional:
+            return .authorized
+        case .denied:
+            return .denied
+        case .notDetermined:
+            return .notDetermined
+        @unknown default:
+            return .denied
+        }
+    }
+
+    private func instanceID(from notification: UNNotification) -> UUID? {
+        guard let instanceID = notification.request.content.userInfo[Self.userInfoInstanceIDKey] as? String else {
+            return nil
+        }
+        return UUID(uuidString: instanceID)
+    }
+
+    func presentationOptions(
+        for instanceID: UUID?,
+        appIsActive: Bool? = nil
+    ) -> UNNotificationPresentationOptions {
+        let appIsCurrentlyActive = appIsActive ?? NSApp.isActive
+
+        guard let instanceID else {
+            return [.banner, .list]
+        }
+
+        guard !(appIsCurrentlyActive && isWidgetVisible(instanceID)) else {
+            return []
+        }
+
+        return [.banner, .list]
+    }
+
+    func handleNotificationActivation(instanceID: UUID?) {
+        openWidget(instanceID)
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        presentationOptions(for: instanceID(from: notification))
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        handleNotificationActivation(instanceID: instanceID(from: response.notification))
+    }
+}
+
+@MainActor
 final class WidgetHostAPI {
     private let sessionManager: WidgetSessionManager
     private let storage: WidgetHostLocalStorageHandling
     private let network: WidgetHostNetworkHandling
     private let media: WidgetHostMediaHandling
+    private let notifications: WidgetHostNotificationHandling?
     private let resolveWidgetID: (UUID) -> String?
+    private let resolveWidgetDefinition: (UUID) -> WidgetDefinition?
     private let log: (String) -> Void
     private let jsonEncoder = JSONEncoder()
     private let jsonDecoder = JSONDecoder()
@@ -1566,7 +1919,9 @@ final class WidgetHostAPI {
         storage: WidgetHostLocalStorageHandling,
         network: WidgetHostNetworkHandling,
         media: WidgetHostMediaHandling? = nil,
+        notifications: WidgetHostNotificationHandling? = nil,
         resolveWidgetID: @escaping (UUID) -> String?,
+        resolveWidgetDefinition: @escaping (UUID) -> WidgetDefinition? = { _ in nil },
         log: @escaping (String) -> Void = { _ in }
     ) {
         let resolvedMedia = media ?? WidgetHostMediaService(log: log)
@@ -1574,7 +1929,9 @@ final class WidgetHostAPI {
         self.storage = storage
         self.network = network
         self.media = resolvedMedia
+        self.notifications = notifications
         self.resolveWidgetID = resolveWidgetID
+        self.resolveWidgetDefinition = resolveWidgetDefinition
         self.log = log
     }
 
@@ -1624,7 +1981,9 @@ final class WidgetHostAPI {
 
         let value: RuntimeJSONValue
         do {
+            let widgetDefinition = resolveWidgetDefinition(instanceID)
             value = try await route(
+                widgetDefinition: widgetDefinition,
                 widgetID: widgetID,
                 instanceID: rpcRequest.instanceId,
                 method: rpcRequest.method,
@@ -1650,6 +2009,7 @@ final class WidgetHostAPI {
     }
 
     private func route(
+        widgetDefinition: WidgetDefinition?,
         widgetID: String,
         instanceID: String,
         method: String,
@@ -1742,6 +2102,61 @@ final class WidgetHostAPI {
         case "media.openSourceApp":
             try await media.openSourceApp()
             return .null
+        case "notifications.schedule":
+            guard let notifications else {
+                throw RuntimeTransportRPCError(
+                    code: -32000,
+                    message: "Widget notifications are unavailable.",
+                    data: nil
+                )
+            }
+            try requireNotificationCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            let notificationParams = try decode(params, as: RuntimeScheduleNotificationParams.self)
+
+            guard Preferences.widgetNotificationsEnabled else {
+                log("Widget notifications: skipped scheduling for \(widgetID)/\(instanceID) because global delivery is disabled.")
+                return .null
+            }
+
+            guard notificationsEnabled(
+                widgetID: widgetID,
+                instanceID: instanceID
+            ) else {
+                log("Widget notifications: skipped scheduling for \(widgetID)/\(instanceID) because this widget instance has notifications disabled.")
+                await notifications.cancelAllNotifications(widgetID: widgetID, instanceID: instanceID)
+                return .null
+            }
+
+            try await notifications.schedule(
+                notificationRequest(
+                    widgetID: widgetID,
+                    instanceID: instanceID,
+                    params: notificationParams
+                )
+            )
+            return .null
+        case "notifications.cancel":
+            guard let notifications else {
+                throw RuntimeTransportRPCError(
+                    code: -32000,
+                    message: "Widget notifications are unavailable.",
+                    data: nil
+                )
+            }
+            try requireNotificationCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            let notificationParams = try decode(params, as: RuntimeCancelNotificationParams.self)
+            await notifications.cancel(
+                widgetID: widgetID,
+                instanceID: instanceID,
+                notificationID: notificationParams.id
+            )
+            return .null
         default:
             throw RuntimeTransportRPCError(
                 code: -32601,
@@ -1800,5 +2215,75 @@ final class WidgetHostAPI {
         case .camera:
             return .camera
         }
+    }
+
+    private func requireNotificationCapability(
+        for widgetID: String,
+        widgetDefinition: WidgetDefinition?
+    ) throws {
+        if widgetDefinition?.supportsNotifications == true {
+            return
+        }
+
+        throw RuntimeTransportRPCError(
+            code: -32030,
+            message: "Widget '\(widgetID)' does not declare notification support.",
+            data: nil
+        )
+    }
+
+    private func notificationsEnabled(
+        widgetID: String,
+        instanceID: String
+    ) -> Bool {
+        guard let storage = storage as? WidgetStorageManager else {
+            return true
+        }
+
+        return storage.notificationsEnabled(
+            widgetID: widgetID,
+            instanceID: instanceID,
+            defaultValue: true
+        )
+    }
+
+    private func notificationRequest(
+        widgetID: String,
+        instanceID: String,
+        params: RuntimeScheduleNotificationParams
+    ) throws -> WidgetHostNotificationRequest {
+        let notificationID = params.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = params.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !notificationID.isEmpty else {
+            throw RuntimeTransportRPCError(
+                code: -32602,
+                message: "Notification id must be a non-empty string.",
+                data: nil
+            )
+        }
+        guard !title.isEmpty else {
+            throw RuntimeTransportRPCError(
+                code: -32602,
+                message: "Notification title must be a non-empty string.",
+                data: nil
+            )
+        }
+        guard params.deliverAtMs.isFinite else {
+            throw RuntimeTransportRPCError(
+                code: -32602,
+                message: "Notification deliverAtMs must be a finite timestamp.",
+                data: nil
+            )
+        }
+
+        let body = params.body?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return WidgetHostNotificationRequest(
+            widgetID: widgetID,
+            instanceID: instanceID,
+            notificationID: notificationID,
+            title: title,
+            body: body?.isEmpty == false ? body : nil,
+            deliverAt: Date(timeIntervalSince1970: params.deliverAtMs / 1000)
+        )
     }
 }

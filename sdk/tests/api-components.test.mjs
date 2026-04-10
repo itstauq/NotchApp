@@ -116,6 +116,11 @@ function loadAPI() {
           };
         case "./functions/openURL":
           return { openURL() {} };
+        case "./functions/notifications":
+          return {
+            scheduleNotification() {},
+            cancelNotification() {},
+          };
         case "./runtime":
           return {
             LocalStorage: {},
@@ -156,6 +161,8 @@ test("@skylane/api exports the extended non-image component surface", () => {
     "usePreference",
     "useCameras",
     "useMedia",
+    "scheduleNotification",
+    "cancelNotification",
     "DropdownMenuLoadingItem",
     "DropdownMenuErrorItem",
   ]) {

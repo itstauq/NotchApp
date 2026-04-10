@@ -1,19 +1,27 @@
 # Widget Development
 
-Build widgets for Skylane with `skylane` and `@skylane/api`.
+Build Skylane widgets with `skylane` and `@skylane/api`.
 
-The day-to-day workflow is simple: install the SDK in your widget package, run `npx skylane dev`, and let Skylane hot-reload your widget while you edit.
+This guide is organized around the way most widgets are actually built:
 
-## Install
+1. create a widget package
+2. run the hot-reload workflow
+3. build UI with the component-first SDK
+4. choose the right state model
+5. add host-managed features such as preferences and notifications
 
-Create a widget package and install the SDK:
+If you are new to Skylane, read this file top to bottom once. After that, it works well as a reference.
+
+## Quick Start
+
+Install the SDK in your widget package:
 
 ```bash
 npm install --save-dev skylane
 npm install @skylane/api
 ```
 
-Minimal layout:
+Recommended package layout:
 
 ```text
 my-widget/
@@ -51,9 +59,7 @@ Example `package.json`:
 }
 ```
 
-## Develop
-
-Run this inside your widget directory:
+Start the development loop inside the widget directory:
 
 ```bash
 npx skylane dev
@@ -65,23 +71,13 @@ Or:
 npm run dev
 ```
 
-`skylane dev` is the main development workflow. It:
+`skylane dev`:
 
 - builds your widget into `.skylane/build/index.cjs`
 - copies package-local assets into `.skylane/build/assets`
 - registers the local widget with Skylane for development
 - watches `package.json`, `src/`, and `assets/`
-- rebuilds and reloads the widget whenever you save changes
-- prints build output in the terminal
-
-That means the normal loop is just:
-
-1. run `npx skylane dev`
-2. edit your widget
-3. save
-4. see the updated widget in Skylane
-
-## Build
+- rebuilds and reloads the widget whenever you save
 
 Create a production build with:
 
@@ -89,23 +85,21 @@ Create a production build with:
 npx skylane build
 ```
 
-## Lint
-
-Validate the widget manifest and entry file with:
+Validate the manifest and entry file with:
 
 ```bash
 npx skylane lint
 ```
 
-## Write a Widget
+## Build Your First Widget
 
 Each widget needs:
 
 - a `default` export that renders the widget
 - a `skylane` manifest in `package.json`
-- any state it needs through normal React hooks or `@skylane/api`
+- any state it needs through React hooks or `@skylane/api`
 
-The recommended authoring style is component-first. Reach for `Card`, `Field`, `List`, `EmptyState`, `Toolbar`, and `DropdownMenu` first. Use low-level primitives like `RoundedRect`, `Circle`, `Stack`, and `Inline` when you intentionally need bespoke layout or presentation.
+The recommended authoring style is component-first. Reach for `Card`, `Field`, `List`, `EmptyState`, `Toolbar`, and `DropdownMenu` first. Use low-level primitives such as `RoundedRect`, `Circle`, `Stack`, and `Inline` only when you intentionally need bespoke layout or presentation.
 
 Example:
 
@@ -124,8 +118,6 @@ import {
 
 export default function Widget({ environment }) {
   const [draft, setDraft] = useLocalStorage("draft", "");
-
-  console.info(`render span=${environment.span} draft=${draft.length}`);
 
   return (
     <Section spacing="md">
@@ -150,29 +142,328 @@ export default function Widget({ environment }) {
 }
 ```
 
-Use normal React state for transient UI state. Use `LocalStorage` when the state should persist across widget reloads.
+The render function receives `environment`. In practice, `environment.span` is the most useful field because it lets the widget adapt to narrow and wide layouts.
 
 Standard components already resolve against the widget theme. Use `useTheme()` when you need advanced customization or when you are intentionally building something bespoke.
 
-The render function receives:
+## Event And Callback Style
 
-- `environment`
-
-`environment.span` is the most useful field in practice. Use it to make your widget width-responsive and adapt to narrow or wide layouts. Theme information is available through `useTheme()` rather than `environment`.
-
-Widget callbacks receive payload objects when the component provides one:
+Widget callbacks can use the low-level host event names:
 
 - `Button`, `Row`, `Checkbox`, and `IconButton` use `onPress`
-- `Input` uses `onChange` and `onSubmit`, and those callbacks receive `{ value }`
+- `Input` uses `onChange` and `onSubmit`, which receive `{ value }`
 - `DropdownMenuItem` and `DropdownMenuCheckboxItem` also use `onPress`
 
-For most widget code, prefer the React-style aliases:
+For normal widget code, prefer the React-style aliases:
 
 - `onClick` for buttons, rows, list items, icon buttons, and menu items
 - `onCheckedChange` for `Checkbox` and `DropdownMenuCheckboxItem`
 - `onValueChange` and `onSubmitValue` for `Input`
 
-`Image` supports both package-local assets such as `src="assets/cover.png"` and remote image URLs. It uses `contentMode="fill"` by default and supports `contentMode="fit"` when you want the entire image visible.
+## Choose The Right State Model
+
+Skylane widgets usually use four different kinds of state. Picking the right one early keeps the widget simple.
+
+### React State
+
+Use normal React state for transient UI values:
+
+- open menus
+- temporary input drafts
+- in-memory loading states
+- optimistic UI that does not need to survive reloads
+
+### LocalStorage
+
+Use `useLocalStorage()` for widget-owned persisted state:
+
+- counters
+- recent widget data
+- dismissed UI state
+- timer state that belongs to the widget itself
+
+Example:
+
+```tsx
+import { Button, Description, Section, useLocalStorage } from "@skylane/api";
+
+export default function Widget() {
+  const [count, setCount] = useLocalStorage("count", 0);
+
+  return (
+    <Section spacing="md">
+      <Description tone="secondary">{`Count: ${count}`}</Description>
+      <Button title="Increment" onClick={() => setCount((current) => current + 1)} />
+    </Section>
+  );
+}
+```
+
+`LocalStorage` is private to widget code. It is not the same thing as manifest preferences.
+
+### Preferences
+
+Use manifest preferences for user configuration values that Skylane should own:
+
+- API tokens
+- account identifiers
+- display modes
+- labels and default choices the user expects to edit in Settings
+
+Preferences are:
+
+- declared under `skylane.preferences`
+- read with `usePreference("name")`
+- resolved before widget code sees them
+- stored per widget instance
+- separate from `LocalStorage`
+
+Preference values resolve in this order:
+
+1. saved value for this widget instance
+2. manifest `default`
+3. `undefined`
+
+Example:
+
+```tsx
+import { Description, Image, Section, usePreference } from "@skylane/api";
+
+export default function Widget() {
+  const [imageUrl] = usePreference("imageUrl");
+  const [caption] = usePreference("caption");
+
+  return (
+    <Section spacing="sm">
+      <Image src={imageUrl} contentMode="fit" />
+      <Description tone="secondary">{caption ?? "Remote image"}</Description>
+    </Section>
+  );
+}
+```
+
+If a preference has `required: true` and still resolves to no usable value:
+
+- the widget does not render normally in the compact surface
+- Skylane shows a host `Configuration Required` state
+- the user can open that widget instance's settings from there
+
+For required text-like fields, empty strings count as missing.
+
+### Notifications
+
+Use widget notifications when the host should deliver a macOS alert on the widget's behalf. Typical examples:
+
+- Pomodoro completion reminders
+- countdown or deadline alerts
+- "come back to this" reminders for a workflow widget
+
+Notifications are host-managed, not widget-managed. The widget requests schedule and cancel actions, while Skylane owns:
+
+- permission prompts
+- system notification delivery
+- foreground suppression when the widget is already visible
+- click routing back into Skylane
+- global and per-instance notification settings
+
+To opt in, declare notification support in the manifest:
+
+```json
+{
+  "skylane": {
+    "id": "com.acme.pomodoro",
+    "title": "Pomodoro",
+    "icon": "timer",
+    "minSpan": 3,
+    "maxSpan": 6,
+    "entry": "src/index.tsx",
+    "capabilities": {
+      "notifications": {}
+    }
+  }
+}
+```
+
+`capabilities.notifications` is optional. If it is missing, the widget cannot schedule notifications.
+
+In widget code, use `scheduleNotification()` and `cancelNotification()`:
+
+```tsx
+import {
+  Button,
+  Description,
+  Section,
+  cancelNotification,
+  scheduleNotification,
+} from "@skylane/api";
+
+const COMPLETION_NOTIFICATION_ID = "session-complete";
+
+export default function Widget() {
+  async function startTimer() {
+    await scheduleNotification(COMPLETION_NOTIFICATION_ID, {
+      title: "Focus complete",
+      body: "Time for a short break.",
+      deliverAtMs: Date.now() + 25 * 60 * 1000,
+    });
+  }
+
+  async function resetTimer() {
+    await cancelNotification(COMPLETION_NOTIFICATION_ID);
+  }
+
+  return (
+    <Section spacing="md">
+      <Description tone="secondary">
+        Schedule one stable notification id per reminder you want to manage.
+      </Description>
+      <Button title="Start focus session" onClick={startTimer} />
+      <Button title="Reset" variant="secondary" onClick={resetTimer} />
+    </Section>
+  );
+}
+```
+
+Important behavior:
+
+- notification ids are scoped to the widget instance
+- scheduling the same id again replaces the earlier pending request for that widget instance
+- Skylane asks for notification permission lazily on the first delivery attempt
+- notifications are silent by default
+- clicking a notification opens Skylane to the relevant widget when possible
+- if Skylane is active and the widget is already visible, the host suppresses the system banner
+
+Best practices:
+
+- use stable ids such as `"session-complete"` instead of generating random ids
+- schedule again when the delivery time or message changes
+- cancel when the underlying reminder is no longer relevant
+- keep titles short and bodies optional
+
+Users control notifications in two places:
+
+- General settings contains the global widget notifications switch
+- Widget settings contains the per-instance notification switch for widgets that declare support
+
+## Manifest
+
+Each widget declares a `skylane` block in `package.json`.
+
+Required fields:
+
+- `id`
+- `title`
+- `icon`
+- `minSpan`
+- `maxSpan`
+
+Optional fields:
+
+- `description`
+- `theme`
+- `entry`
+- `preferences`
+- `capabilities`
+
+`entry` defaults to `src/index.tsx`.
+
+`theme` lets a widget opt into a curated platform theme. The resolved theme is exposed through `useTheme()`. Supported values today:
+
+- `neutral`
+- `amber`
+- `blue`
+- `cyan`
+- `emerald`
+- `fuchsia`
+- `green`
+- `indigo`
+- `lime`
+- `orange`
+- `pink`
+
+`capabilities` is where a widget declares access to host-managed APIs. Current capability keys:
+
+- `notifications`
+
+Example manifest with both preferences and notifications:
+
+```json
+{
+  "name": "@acme/skylane-widget-focus",
+  "private": true,
+  "scripts": {
+    "dev": "skylane dev",
+    "build": "skylane build",
+    "lint": "skylane lint"
+  },
+  "devDependencies": {
+    "skylane": "^0.1.0"
+  },
+  "dependencies": {
+    "@skylane/api": "^0.1.0"
+  },
+  "skylane": {
+    "id": "com.acme.focus",
+    "title": "Focus",
+    "description": "A configurable focus timer",
+    "icon": "timer",
+    "theme": "orange",
+    "minSpan": 3,
+    "maxSpan": 6,
+    "entry": "src/index.tsx",
+    "capabilities": {
+      "notifications": {}
+    },
+    "preferences": [
+      {
+        "name": "durationMinutes",
+        "title": "Duration",
+        "description": "Length of one focus session in minutes.",
+        "type": "textfield",
+        "default": "25"
+      },
+      {
+        "name": "autoStartBreak",
+        "title": "Auto-start break",
+        "label": "Start the break timer automatically",
+        "type": "checkbox",
+        "default": true
+      }
+    ]
+  }
+}
+```
+
+Current validation rules:
+
+- `id` and `title` must be non-empty
+- `minSpan` and `maxSpan` must be integers
+- `minSpan` must be greater than `0`
+- `maxSpan` must be greater than or equal to `minSpan`
+- the entry file must exist
+- the host currently supports up to `12` columns
+
+### Supported Preference Fields
+
+Use these field names exactly:
+
+- `name`
+- `title`
+- `description`
+- `type`
+- `required`
+- `placeholder`
+- `default`
+- `label` for `checkbox`
+- `data` for `dropdown`
+
+Supported preference `type` values today:
+
+- `textfield`
+- `password`
+- `checkbox`
+- `dropdown`
+- `camera`
 
 ## UI System
 
@@ -194,7 +485,7 @@ Text uses `variant` instead of `role`. Supported variants are:
 - `label`
 - `placeholder`
 
-Use `tone` for semantic meaning only, such as:
+Use `tone` for semantic meaning only:
 
 - `primary`
 - `secondary`
@@ -218,301 +509,35 @@ Examples:
 - [settings-menu](../examples/settings-menu)
 - [widget-ui.md](./widget-ui.md)
 
-## Preferences
+## Images And Host APIs
 
-Widget preferences are host-managed configuration values defined in the widget manifest and edited per widget instance inside Skylane.
+`Image` supports both package-local assets and remote `https://` URLs.
 
-This keeps the manifest model intentionally close to Raycast, but widgets read values through React hooks:
+For local images, place files under `assets/` and reference them with package-relative paths such as `src="assets/cover.png"`.
 
-- preferences are declared under `skylane.preferences`
-- values are read with `usePreference("name")`
-- values are resolved before widget code sees them
-- required preferences block normal widget rendering until configured
+`skylane build` and `skylane dev` copy `assets/` into `.skylane/build/assets`, so the same path works in development and packaged installs.
 
-Preference values are resolved in this order:
+Remote image URLs are fetched by the host image pipeline, not by widget code:
 
-1. saved value for this widget instance
-2. manifest `default`
-3. `undefined`
+- only `https://` is supported
+- requests are anonymous
+- custom headers, cookies, and auth are not supported yet
 
-That means preferences are:
+Other host-backed APIs available through `@skylane/api`:
 
-- per widget instance
-- separate from `LocalStorage`
-- meant for user configuration, not internal widget state
+- `useCameras()` for camera selection
+- `useMedia()` for now-playing data and transport controls
+- `useFetch()` and `usePromise()` for advanced async flows
+- `openURL()` for opening external links
 
-Example:
+## Configure In Skylane
 
-```tsx
-import { Image, RoundedRect, Stack, Text, usePreference } from "@skylane/api";
-
-export default function Widget() {
-  const [imageUrl] = usePreference("imageUrl");
-  const [title] = usePreference("title");
-
-  return (
-    <Stack spacing={10}>
-      <RoundedRect
-        fill="#0f172a"
-        frame={{ maxWidth: "infinity", height: 112 }}
-        clipShape={{ type: "roundedRect", cornerRadius: 18 }}
-      >
-        <Image src={imageUrl} contentMode="fit" />
-      </RoundedRect>
-      <Text>{title ?? "Remote image"}</Text>
-      <Text tone="secondary">Configured through widget preferences</Text>
-    </Stack>
-  );
-}
-```
-
-### Supported Preference Fields
-
-Use the Raycast field names exactly:
-
-- `name`
-- `title`
-- `description`
-- `type`
-- `required`
-- `placeholder`
-- `default`
-- `label` for `checkbox`
-- `data` for `dropdown`
-
-Supported preference `type` values today:
-
-- `textfield`
-- `password`
-- `checkbox`
-- `dropdown`
-
-### Required Preferences
-
-If a preference has `required: true` and still resolves to no usable value:
-
-- the widget does not render normally in the compact surface
-- Skylane shows a host `Configuration Required` state
-- the user can open that widget instance’s settings from there
-
-For required text-like fields:
-
-- empty strings are treated as missing
-
-Optional fields without a saved value or default resolve to `undefined`.
-
-## Manifest
-
-Each widget declares a `skylane` block in `package.json`.
-
-Required fields:
-
-- `id`
-- `title`
-- `icon`
-- `minSpan`
-- `maxSpan`
-
-Optional fields:
-
-- `description`
-- `theme`
-- `entry` default: `src/index.tsx`
-- `preferences`
-
-`theme` lets a widget opt into a curated platform theme. The resolved theme is exposed to widget code through `useTheme()`. Supported values today:
-
-- `neutral`
-- `amber`
-- `blue`
-- `cyan`
-- `emerald`
-- `fuchsia`
-- `green`
-- `indigo`
-- `lime`
-- `orange`
-- `pink`
-
-Current validation rules:
-
-- `id` and `title` must be non-empty
-- `minSpan` and `maxSpan` must be integers
-- `minSpan` must be greater than `0`
-- `maxSpan` must be greater than or equal to `minSpan`
-- the entry file must exist
-- the host currently supports up to `12` columns
-
-Extended example with preferences:
-
-```json
-{
-  "name": "@acme/skylane-widget-remote-image",
-  "private": true,
-  "scripts": {
-    "dev": "skylane dev",
-    "build": "skylane build",
-    "lint": "skylane lint"
-  },
-  "devDependencies": {
-    "skylane": "^0.1.0"
-  },
-  "dependencies": {
-    "@skylane/api": "^0.1.0"
-  },
-  "skylane": {
-    "id": "com.acme.remote-image",
-    "title": "Remote Image",
-    "description": "Remote image example",
-    "icon": "network",
-    "minSpan": 3,
-    "maxSpan": 12,
-    "entry": "src/index.tsx",
-    "preferences": [
-      {
-        "name": "imageUrl",
-        "title": "Image URL",
-        "description": "HTTPS image URL to display in the widget.",
-        "type": "textfield",
-        "placeholder": "https://example.com/image.png",
-        "required": true
-      },
-      {
-        "name": "caption",
-        "title": "Caption",
-        "type": "textfield",
-        "default": "Remote image"
-      },
-      {
-        "name": "fitImage",
-        "title": "Fit Image",
-        "label": "Show the full image",
-        "type": "checkbox",
-        "default": true
-      },
-      {
-        "name": "theme",
-        "title": "Theme",
-        "type": "dropdown",
-        "default": "dark",
-        "data": [
-          { "title": "Dark", "value": "dark" },
-          { "title": "Light", "value": "light" }
-        ]
-      }
-    ]
-  }
-}
-```
-
-## Components
-
-`@skylane/api` exports both product components and low-level primitives.
-
-Primary UI components:
-
-- `Card`, `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `CardFooter`
-- `Section`, `SectionHeader`, `SectionTitle`, `SectionDescription`
-- `List`, `ListItem`, `ListItemTitle`, `ListItemDescription`, `ListItemAction`
-- `Overlay`, `Field`, `Label`, `Description`, `EmptyState`, `Badge`, `Toolbar`, `ToolbarButton`
-- `DropdownMenu`, `DropdownMenuTriggerButton`, `DropdownMenuItem`, `DropdownMenuCheckboxItem`, `DropdownMenuLoadingItem`, `DropdownMenuErrorItem`, `DropdownMenuSeparator`
-
-Low-level primitives:
-
-- `Stack`, `Inline`, `Spacer`
-- `Text`, `Icon`, `Image`
-- `Button`, `Row`, `IconButton`, `Checkbox`, `Input`
-- `ScrollView`, `Divider`, `Circle`, `RoundedRect`, `Camera`, `Menu`
-- `useTheme`
-
-Host-backed hooks:
-
-- `usePreference`
-- `useCameras`
-- `useLocalStorage`
-- `usePromise`, `useFetch`
-
-The fastest references are [sdk/examples/list-form](../examples/list-form), [sdk/examples/media-player](../examples/media-player), [sdk/examples/settings-menu](../examples/settings-menu), and [sdk/docs/widget-ui.md](./widget-ui.md).
-
-## LocalStorage vs Preferences
-
-Use `LocalStorage` for widget-owned persisted state such as:
-
-- cached counters
-- dismissed UI state
-- local widget data
-
-Use manifest preferences for user-configured values such as:
-
-- API tokens
-- account IDs
-- user-chosen labels
-- display modes
-
-Important differences:
-
-- `LocalStorage` is widget code controlled
-- preferences are host controlled
-- `LocalStorage.allItems()` does not include preference values
-- preference values are read through `usePreference("name")`
-
-## Local Images
-
-For local widget images, place files under your package `assets/` directory and reference them with package-relative paths:
-
-```tsx
-import { Image, RoundedRect } from "@skylane/api";
-
-export default function Widget() {
-  return (
-    <RoundedRect frame={{ width: 56, height: 56 }} clipShape={{ type: "roundedRect", cornerRadius: 14 }}>
-      <Image src="assets/cover.png" contentMode="fit" />
-    </RoundedRect>
-  );
-}
-```
-
-`skylane build` and `skylane dev` copy `assets/` into `.skylane/build/assets`, so `src="assets/cover.png"` works in both local development and packaged widget installs.
-
-## Remote Images
-
-Remote image URLs are fetched by the host image pipeline, not by widget code.
-
-- widgets can use `https://` remote image URLs
-- remote image requests are anonymous and do not support custom headers, cookies, or auth yet
-- if the URL should be user-configurable, prefer a required manifest preference plus `usePreference("imageUrl")`
-
-Example:
-
-```tsx
-import { Image, RoundedRect, usePreference } from "@skylane/api";
-
-export default function Widget() {
-  const [imageUrl] = usePreference("imageUrl");
-
-  return (
-    <RoundedRect frame={{ width: 72, height: 72 }} clipShape={{ type: "roundedRect", cornerRadius: 18 }}>
-      <Image src={imageUrl} contentMode="fit" />
-    </RoundedRect>
-  );
-}
-```
-
-`Image` currently supports:
-
-- `src`
-- `contentMode="fill"` (default)
-- `contentMode="fit"`
-
-## Configure in Skylane
-
-Widget preferences are edited inside Skylane:
+Widget preferences and per-instance notification settings are edited inside Skylane:
 
 1. open Settings
 2. go to `Widgets`
 3. select the widget instance from the mirrored panel preview
-4. open the `Configuration` tab
-5. update the instance-specific preferences
+4. update the instance-specific settings
 
 Text and password fields save on Enter or when focus leaves the field. Toggles and dropdowns save immediately.
 
@@ -523,6 +548,14 @@ If the widget shows `Configuration Required`:
 - make sure all required preferences are filled in
 - for required text or password fields, an empty string still counts as missing
 - check that dropdown defaults or saved values exist in the declared `data`
+
+If notifications do not fire:
+
+- make sure the widget declares `skylane.capabilities.notifications`
+- make sure widget notifications are enabled globally in General settings
+- make sure notifications are enabled for that widget instance in Widget settings
+- make sure Skylane has notification permission in macOS System Settings
+- make sure the widget uses a stable id and a future `deliverAtMs`
 
 If a remote image does not load:
 

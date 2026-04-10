@@ -109,6 +109,37 @@ final class WidgetStorageEngine {
         }
     }
 
+    func item(widgetID: String, instanceID: String, key: String) throws -> RuntimeJSONValue? {
+        let db = try databaseHandle(for: widgetID)
+        let sql = "SELECT value_json FROM storage WHERE instance_id = ? AND key = ? LIMIT 1;"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw WidgetStorageEngineError.prepareFailed(lastError(on: db))
+        }
+        defer { sqlite3_finalize(statement) }
+
+        try bind(instanceID, at: 1, in: statement, db: db)
+        try bind(key, at: 2, in: statement, db: db)
+
+        let result = sqlite3_step(statement)
+        if result == SQLITE_DONE {
+            return nil
+        }
+        guard result == SQLITE_ROW else {
+            throw WidgetStorageEngineError.stepFailed(lastError(on: db))
+        }
+        guard let blob = sqlite3_column_blob(statement, 0) else {
+            return .null
+        }
+        let length = Int(sqlite3_column_bytes(statement, 0))
+        let data = Data(bytes: blob, count: length)
+        do {
+            return try decoder.decode(RuntimeJSONValue.self, from: data)
+        } catch {
+            throw WidgetStorageEngineError.decodeFailed(error.localizedDescription)
+        }
+    }
+
     func setItem(widgetID: String, instanceID: String, key: String, value: RuntimeJSONValue) throws {
         let db = try databaseHandle(for: widgetID)
         let sql = """

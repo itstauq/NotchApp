@@ -39,6 +39,7 @@ enum Preferences {
     private static let hoverDelayKey = "hoverDelay"
     private static let rememberLastViewKey = "rememberLastView"
     private static let accentColorKey = "accentColor"
+    private static let widgetNotificationsEnabledKey = "widgetNotificationsEnabled"
     private static let keyboardShortcutsEnabledKey = "keyboardShortcutsEnabled"
     private static let toggleLaneShortcutKeyCodeKey = "toggleLaneShortcutKeyCode"
     private static let toggleLaneShortcutModifiersKey = "toggleLaneShortcutModifiers"
@@ -181,6 +182,20 @@ enum Preferences {
         }
     }
 
+    static var widgetNotificationsEnabled: Bool {
+        get {
+            if UserDefaults.standard.object(forKey: widgetNotificationsEnabledKey) == nil {
+                return true
+            }
+
+            return UserDefaults.standard.bool(forKey: widgetNotificationsEnabledKey)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: widgetNotificationsEnabledKey)
+            NotificationCenter.default.post(name: .widgetNotificationsPreferenceDidChange, object: nil)
+        }
+    }
+
     static var keyboardShortcutsEnabled: Bool {
         get {
             if UserDefaults.standard.object(forKey: keyboardShortcutsEnabledKey) == nil {
@@ -227,6 +242,7 @@ enum Preferences {
 extension Notification.Name {
     static let menuBarIconPreferenceDidChange = Notification.Name("menuBarIconPreferenceDidChange")
     static let accentColorPreferenceDidChange = Notification.Name("accentColorPreferenceDidChange")
+    static let widgetNotificationsPreferenceDidChange = Notification.Name("widgetNotificationsPreferenceDidChange")
     static let keyboardShortcutsPreferenceDidChange = Notification.Name("keyboardShortcutsPreferenceDidChange")
     static let keyboardShortcutPreferenceDidChange = Notification.Name("keyboardShortcutPreferenceDidChange")
 }

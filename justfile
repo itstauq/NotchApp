@@ -116,8 +116,14 @@ test:
     BUILD_ROOT="${BUILD_ROOT:-$REPO_ROOT/.build/ci}"
     DERIVED_DATA_PATH="$BUILD_ROOT/DerivedData"
     SOURCE_PACKAGES_DIR="$BUILD_ROOT/SourcePackages"
+    TEST_HOME="$BUILD_ROOT/home"
 
-    mkdir -p "$BUILD_ROOT" "$SOURCE_PACKAGES_DIR"
+    mkdir -p \
+      "$BUILD_ROOT" \
+      "$SOURCE_PACKAGES_DIR" \
+      "$TEST_HOME/Library/Caches" \
+      "$TEST_HOME/Library/Logs" \
+      "$TEST_HOME/Library/Developer"
 
     echo "Bootstrapping bundled widget toolchain..."
     "$REPO_ROOT/runtime/runtime-launcher" bootstrap
@@ -136,6 +142,8 @@ test:
     "$NPM_BIN" test --prefix "$REPO_ROOT/sdk"
 
     echo "Running macOS unit tests..."
+    HOME="$TEST_HOME" \
+    CFFIXED_USER_HOME="$TEST_HOME" \
     xcodebuild test \
       -project "$REPO_ROOT/Skylane.xcodeproj" \
       -scheme SkylaneTests \

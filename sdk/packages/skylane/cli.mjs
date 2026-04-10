@@ -318,10 +318,22 @@ function parseRunningSkylaneBundlePaths(psOutput) {
 
 function runCommand(command, args, options = {}) {
   return new Promise((resolve) => {
-    const child = spawn(command, args, {
-      stdio: ["ignore", "pipe", "pipe"],
-      ...options,
-    });
+    let child;
+    try {
+      child = spawn(command, args, {
+        stdio: ["ignore", "pipe", "pipe"],
+        ...options,
+      });
+    } catch (error) {
+      resolve({
+        code: null,
+        stdout: "",
+        stderr: "",
+        error,
+      });
+      return;
+    }
+
     let stdout = "";
     let stderr = "";
 

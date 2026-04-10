@@ -48,6 +48,7 @@ struct WidgetDefinition: Identifiable, Codable, Equatable {
     var icon: String
     var description: String?
     var theme: WidgetTheme?
+    var capabilities: WidgetCapabilitiesDefinition?
     var minSpan: Int
     var maxSpan: Int
     var package: WidgetPackage
@@ -90,6 +91,10 @@ struct WidgetDefinition: Identifiable, Codable, Equatable {
         resolvedTheme.accentColor
     }
 
+    var supportsNotifications: Bool {
+        capabilities?.notifications != nil
+    }
+
     private var fallbackTheme: WidgetTheme {
         let themes = WidgetTheme.allCases
         return themes[stableThemeSeed % themes.count]
@@ -108,6 +113,7 @@ struct WidgetDefinition: Identifiable, Codable, Equatable {
             icon: "exclamationmark.triangle.fill",
             description: "Unavailable",
             theme: nil,
+            capabilities: nil,
             minSpan: 3,
             maxSpan: ViewLayout.columnCount,
             package: WidgetPackage(
@@ -161,6 +167,13 @@ enum WidgetTheme: String, Codable, Equatable, CaseIterable {
             return WidgetResolvedTheme.make(theme: self, accent: "#FA757A", accentForeground: "#000000BF")
         }
     }
+}
+
+struct WidgetCapabilitiesDefinition: Codable, Equatable {
+    var notifications: WidgetNotificationCapabilityDefinition?
+}
+
+struct WidgetNotificationCapabilityDefinition: Codable, Equatable {
 }
 
 struct WidgetResolvedTheme: Codable, Equatable {
@@ -402,11 +415,25 @@ struct WidgetManifest: Codable {
         var title: String
         var icon: String
         var theme: WidgetTheme?
+        var capabilities: WidgetCapabilitiesDefinition?
+        var notifications: WidgetNotificationCapabilityDefinition?
         var minSpan: Int
         var maxSpan: Int
         var description: String?
         var entry: String?
         var preferences: [WidgetPreferenceDefinition]?
+
+        var resolvedCapabilities: WidgetCapabilitiesDefinition? {
+            if let capabilities {
+                return capabilities
+            }
+
+            guard let notifications else {
+                return nil
+            }
+
+            return WidgetCapabilitiesDefinition(notifications: notifications)
+        }
     }
 
     var name: String
@@ -483,6 +510,7 @@ enum WidgetCatalog {
                     icon: skylaneManifest.icon,
                     description: skylaneManifest.description,
                     theme: skylaneManifest.theme,
+                    capabilities: skylaneManifest.resolvedCapabilities,
                     minSpan: skylaneManifest.minSpan,
                     maxSpan: skylaneManifest.maxSpan,
                     package: package,

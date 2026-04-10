@@ -48,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         observeKeyboardShortcutsPreference()
         observeKeyboardShortcutPreference()
         setupLane()
+        configureWidgetNotifications()
         registerHotKeyIfNeeded()
         startMouseMonitor()
     }
@@ -149,6 +150,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         panel.alphaValue = 1
         panel.orderFrontRegardless()
         lanePanel = panel
+    }
+
+    private func configureWidgetNotifications() {
+        let notifications = WidgetNotificationService.shared
+        notifications.openWidget = { [weak self] instanceID in
+            self?.handleWidgetNotificationActivation(instanceID)
+        }
+        notifications.isWidgetVisible = { [weak self] instanceID in
+            self?.vm.isWidgetVisible(instanceID) ?? false
+        }
+    }
+
+    private func handleWidgetNotificationActivation(_ instanceID: UUID?) {
+        hoverOpenTask?.cancel()
+        lanePanel?.alphaValue = 1
+        blurPanel?.alphaValue = 1
+        blurPanel?.orderFrontRegardless()
+        lanePanel?.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps: true)
+
+        if let instanceID {
+            _ = vm.revealWidget(instanceID)
+        } else if !vm.isExpanded {
+            vm.clicked()
+        }
     }
 
     private func contains(_ rect: CGRect, _ point: CGPoint) -> Bool {

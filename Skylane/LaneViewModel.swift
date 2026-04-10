@@ -328,8 +328,12 @@ final class WidgetRuntimeController {
             storage: storageManager,
             network: WidgetHostNetworkService(),
             media: mediaService,
+            notifications: WidgetNotificationService.shared,
             resolveWidgetID: { [weak self] instanceID in
                 self?.mountedWidgets[instanceID]?.definition.id
+            },
+            resolveWidgetDefinition: { [weak self] instanceID in
+                self?.mountedWidgets[instanceID]?.definition
             },
             log: { [weak self] message in
                 self?.log.write(message)
@@ -1034,6 +1038,40 @@ final class LaneViewModel {
 
     func refreshWidgetDefinitions() {
         viewManager.reloadWidgetDefinitions()
+    }
+
+    func isWidgetVisible(_ instanceID: UUID) -> Bool {
+        guard isExpanded,
+              let selectedView = viewManager.selectedView,
+              let widget = viewManager.widget(id: instanceID, in: selectedView) else {
+            return false
+        }
+
+        return viewManager.definition(for: widget) != nil
+    }
+
+    func revealWidget(_ instanceID: UUID) -> Bool {
+        refreshWidgetDefinitions()
+
+        guard let targetView = viewManager.views.first(where: { view in
+            viewManager.layout(for: view).widgets.contains(where: { $0.id == instanceID })
+        }) else {
+            withAnimation(Self.peekAnim) {
+                isExpanded = true
+                isElevated = true
+                isQuickPeeking = true
+            }
+            return false
+        }
+
+        viewManager.select(targetView)
+        collapseTask?.cancel()
+        withAnimation(Self.peekAnim) {
+            isExpanded = true
+            isElevated = true
+            isQuickPeeking = true
+        }
+        return true
     }
 
     func handleDevelopmentEvent(widgetID: String, event: String, info: String?) {

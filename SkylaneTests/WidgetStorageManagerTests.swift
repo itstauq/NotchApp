@@ -186,6 +186,42 @@ final class WidgetStorageManagerTests: XCTestCase {
         )
     }
 
+    func testNotificationStateDefaultsWhenNoOverrideExists() throws {
+        let (manager, rootURL) = makeManager()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let enabled = manager.notificationsEnabled(
+            widgetID: "demo.widget",
+            instanceID: UUID().uuidString,
+            defaultValue: true
+        )
+
+        XCTAssertTrue(enabled)
+    }
+
+    func testNotificationStateRoundTripsPerInstanceOverride() throws {
+        let (manager, rootURL) = makeManager()
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+
+        let widgetID = "demo.widget"
+        let instanceID = UUID().uuidString
+
+        try manager.setNotificationsEnabled(
+            widgetID: widgetID,
+            instanceID: instanceID,
+            enabled: false
+        )
+        manager.flushPendingWrites()
+
+        XCTAssertFalse(
+            manager.notificationsEnabled(
+                widgetID: widgetID,
+                instanceID: instanceID,
+                defaultValue: true
+            )
+        )
+    }
+
     func testLocalStorageAllItemsHidesPreferenceEntries() throws {
         let (manager, rootURL) = makeManager()
         defer { try? FileManager.default.removeItem(at: rootURL) }
@@ -246,6 +282,18 @@ final class WidgetStorageManagerTests: XCTestCase {
                 method: "localStorage.removeItem",
                 params: .object([
                     "key": .string("__widgetPreference__:mailbox")
+                ])
+            )
+        )
+
+        XCTAssertThrowsError(
+            try manager.handleRPC(
+                widgetID: widgetID,
+                instanceID: instanceID,
+                method: "localStorage.setItem",
+                params: .object([
+                    "key": .string("__widgetNotification__:enabled"),
+                    "value": .bool(true)
                 ])
             )
         )
