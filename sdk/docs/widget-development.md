@@ -502,12 +502,17 @@ Variants on standard controls are intentionally opinionated:
 - `IconButton`: `default`, `secondary`, `ghost`, `destructive`
 - `Card`: `default`, `secondary`, `accent`, `ghost`
 
+When you need bespoke composition, use `useTheme().colors` as a small semantic palette instead of introducing widget-local color constants.
+
+The canonical token list, component mapping, and mock-widget theme family mapping live in [widget-theme-mapping.md](./widget-theme-mapping.md).
+
 Examples:
 
 - [list-form](../examples/list-form)
 - [media-player](../examples/media-player)
 - [settings-menu](../examples/settings-menu)
 - [widget-ui.md](./widget-ui.md)
+- [widget-theme-mapping.md](./widget-theme-mapping.md)
 
 ## Images And Host APIs
 

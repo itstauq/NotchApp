@@ -25,30 +25,27 @@ const MENU_LABEL_SLOT_TYPE = "__skylane_menuLabel";
 
 const mockTheme = {
   colors: {
-    accent: "#B08AFA",
-    accentForeground: "#000000BF",
-    surfaceCanvas: "#17191E",
-    surfacePrimary: "#FFFFFF10",
-    surfaceSecondary: "#FFFFFF0D",
-    surfaceTertiary: "#FFFFFF08",
-    surfaceAccent: "#B08AFA2E",
-    surfaceAccentEmphasis: "#B08AFA42",
-    surfaceOverlay: "#00000047",
-    borderPrimary: "#FFFFFF1F",
-    borderSecondary: "#FFFFFF12",
-    borderAccent: "#B08AFA52",
-    textPrimary: "#FFFFFFE0",
-    textSecondary: "#FFFFFFB8",
-    textTertiary: "#FFFFFF6B",
-    textPlaceholder: "#FFFFFF7A",
-    textOnAccent: "#000000BF",
-    iconPrimary: "#FFFFFFD6",
-    iconSecondary: "#FFFFFFB8",
-    iconTertiary: "#FFFFFF70",
-    iconOnAccent: "#000000BF",
+    background: "#17191E",
+    foreground: "#FFFFFFF0",
+    card: "#FFFFFF10",
+    cardForeground: "#FFFFFFF0",
+    popover: "#00000047",
+    popoverForeground: "#FFFFFFD6",
+    primary: "#B08AFA",
+    primaryForeground: "#000000BF",
+    secondary: "#FFFFFF0F",
+    secondaryForeground: "#FFFFFFCC",
+    muted: "#FFFFFF08",
+    mutedForeground: "#FFFFFF8F",
+    accent: "#B08AFA2E",
+    accentForeground: "#FFFFFFF0",
     success: "#33D175",
     warning: "#FCAD59",
     destructive: "#FA6478",
+    destructiveForeground: "#FFFFFFF0",
+    border: "#FFFFFF1F",
+    input: "#FFFFFF1F",
+    ring: "#B08AFA52",
   },
   typography: {
     title: { size: 12, weight: "semibold" },
@@ -244,7 +241,7 @@ test("reconciler serializes shadcn-inspired product components into host primiti
 
   assert.equal(tree.type, "Stack");
   assert.equal(tree.children[0].type, "RoundedRect");
-  assert.equal(tree.children[0].props.fill, mockTheme.colors.surfaceAccent);
+  assert.equal(tree.children[0].props.fill, mockTheme.colors.accent);
   assert.equal(tree.children[0].children[0].type, "Stack");
   assert.equal(tree.children[0].children[0].children[0].type, "Stack");
   assert.equal(tree.children[0].children[0].children[0].children[0].type, "Text");

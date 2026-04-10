@@ -139,32 +139,119 @@ enum WidgetTheme: String, Codable, Equatable, CaseIterable {
     case indigo
     case lime
     case orange
+    case periwinkle
     case pink
+    case violet
 
     var resolvedTheme: WidgetResolvedTheme {
         switch self {
         case .neutral:
-            return WidgetResolvedTheme.make(theme: self, accent: "#404752", accentForeground: "#FFFFFFE0", surfaceCanvas: "#1E232B")
+            return WidgetResolvedTheme.palette(
+                theme: self,
+                colors: .palette(
+                    background: "#1E232B",
+                    primary: "#404752",
+                    primaryForeground: "#FFFFFFE0",
+                    accentForeground: "#FFFFFFF0",
+                    ring: "#69738552"
+                )
+            )
         case .amber:
-            return WidgetResolvedTheme.make(theme: self, accent: "#FCAD59", accentForeground: "#000000BF")
+            return WidgetResolvedTheme.palette(
+                theme: self,
+                colors: .palette(
+                    primary: "#FCAD59",
+                    primaryForeground: "#000000BF"
+                )
+            )
         case .blue:
-            return WidgetResolvedTheme.make(theme: self, accent: "#63ADFA", accentForeground: "#000000BF")
+            return WidgetResolvedTheme.palette(
+                theme: self,
+                colors: .palette(
+                    primary: "#63ADFA",
+                    primaryForeground: "#000000BF"
+                )
+            )
         case .cyan:
-            return WidgetResolvedTheme.make(theme: self, accent: "#8AC2FA", accentForeground: "#000000BF")
+            return WidgetResolvedTheme.palette(
+                theme: self,
+                colors: .palette(
+                    primary: "#8AC2FA",
+                    primaryForeground: "#000000BF"
+                )
+            )
         case .emerald:
-            return WidgetResolvedTheme.make(theme: self, accent: "#33D175", accentForeground: "#000000BF")
+            return WidgetResolvedTheme.palette(
+                theme: self,
+                colors: .palette(
+                    primary: "#33D175",
+                    primaryForeground: "#000000BF"
+                )
+            )
         case .fuchsia:
-            return WidgetResolvedTheme.make(theme: self, accent: "#B85CFA", accentForeground: "#000000BF")
+            return WidgetResolvedTheme.palette(
+                theme: self,
+                colors: .palette(
+                    primary: "#B85CFA",
+                    primaryForeground: "#000000BF"
+                )
+            )
         case .green:
-            return WidgetResolvedTheme.make(theme: self, accent: "#75D1B8", accentForeground: "#000000BF")
+            return WidgetResolvedTheme.palette(
+                theme: self,
+                colors: .palette(
+                    primary: "#75D1B8",
+                    primaryForeground: "#000000BF"
+                )
+            )
         case .indigo:
-            return WidgetResolvedTheme.make(theme: self, accent: "#B08AFA", accentForeground: "#000000BF")
+            return WidgetResolvedTheme.palette(
+                theme: self,
+                colors: .palette(
+                    primary: "#B08AFA",
+                    primaryForeground: "#000000BF"
+                )
+            )
         case .lime:
-            return WidgetResolvedTheme.make(theme: self, accent: "#33D175", accentForeground: "#000000BF")
+            return WidgetResolvedTheme.palette(
+                theme: self,
+                colors: .palette(
+                    primary: "#C7E36B",
+                    primaryForeground: "#000000BF"
+                )
+            )
         case .orange:
-            return WidgetResolvedTheme.make(theme: self, accent: "#FC7A2E", accentForeground: "#000000BF")
+            return WidgetResolvedTheme.palette(
+                theme: self,
+                colors: .palette(
+                    primary: "#FC7A2E",
+                    primaryForeground: "#000000BF"
+                )
+            )
+        case .periwinkle:
+            return WidgetResolvedTheme.palette(
+                theme: self,
+                colors: .palette(
+                    primary: "#8FADF5",
+                    primaryForeground: "#000000BF"
+                )
+            )
         case .pink:
-            return WidgetResolvedTheme.make(theme: self, accent: "#FA757A", accentForeground: "#000000BF")
+            return WidgetResolvedTheme.palette(
+                theme: self,
+                colors: .palette(
+                    primary: "#FA757A",
+                    primaryForeground: "#000000BF"
+                )
+            )
+        case .violet:
+            return WidgetResolvedTheme.palette(
+                theme: self,
+                colors: .palette(
+                    primary: "#B894FA",
+                    primaryForeground: "#000000BF"
+                )
+            )
         }
     }
 }
@@ -185,43 +272,16 @@ struct WidgetResolvedTheme: Codable, Equatable {
     var controls: WidgetThemeControls
 
     var accentColor: Color {
-        Color(hex: colors.accent) ?? .white
+        Color(hex: colors.primary) ?? .white
     }
 
-    static func make(
+    static func palette(
         theme: WidgetTheme,
-        accent: String,
-        accentForeground: String,
-        surfaceCanvas: String = "#17191E"
+        colors: WidgetThemeColors
     ) -> WidgetResolvedTheme {
         WidgetResolvedTheme(
             name: theme,
-            colors: WidgetThemeColors(
-                accent: accent,
-                accentForeground: accentForeground,
-                surfaceCanvas: surfaceCanvas,
-                surfacePrimary: "#FFFFFF10",
-                surfaceSecondary: "#FFFFFF0D",
-                surfaceTertiary: "#FFFFFF08",
-                surfaceAccent: accent.withAlpha("2E"),
-                surfaceAccentEmphasis: accent.withAlpha("42"),
-                surfaceOverlay: "#00000047",
-                borderPrimary: "#FFFFFF1F",
-                borderSecondary: "#FFFFFF12",
-                borderAccent: accent.withAlpha("52"),
-                textPrimary: "#FFFFFFE0",
-                textSecondary: "#FFFFFFB8",
-                textTertiary: "#FFFFFF6B",
-                textPlaceholder: "#FFFFFF7A",
-                textOnAccent: accentForeground,
-                iconPrimary: "#FFFFFFD6",
-                iconSecondary: "#FFFFFFB8",
-                iconTertiary: "#FFFFFF70",
-                iconOnAccent: accentForeground,
-                success: "#33D175",
-                warning: "#FCAD59",
-                destructive: "#FA6478"
-            ),
+            colors: colors,
             typography: WidgetThemeTypography(
                 title: .init(size: 12, weight: "semibold"),
                 subtitle: .init(size: 11, weight: "semibold"),
@@ -246,30 +306,75 @@ struct WidgetResolvedTheme: Codable, Equatable {
 }
 
 struct WidgetThemeColors: Codable, Equatable {
+    var background: String
+    var foreground: String
+    var card: String
+    var cardForeground: String
+    var popover: String
+    var popoverForeground: String
+    var primary: String
+    var primaryForeground: String
+    var secondary: String
+    var secondaryForeground: String
+    var muted: String
+    var mutedForeground: String
     var accent: String
     var accentForeground: String
-    var surfaceCanvas: String
-    var surfacePrimary: String
-    var surfaceSecondary: String
-    var surfaceTertiary: String
-    var surfaceAccent: String
-    var surfaceAccentEmphasis: String
-    var surfaceOverlay: String
-    var borderPrimary: String
-    var borderSecondary: String
-    var borderAccent: String
-    var textPrimary: String
-    var textSecondary: String
-    var textTertiary: String
-    var textPlaceholder: String
-    var textOnAccent: String
-    var iconPrimary: String
-    var iconSecondary: String
-    var iconTertiary: String
-    var iconOnAccent: String
     var success: String
     var warning: String
     var destructive: String
+    var destructiveForeground: String
+    var border: String
+    var input: String
+    var ring: String
+
+    static func palette(
+        background: String = "#17191E",
+        foreground: String = "#FFFFFFF0",
+        card: String = "#FFFFFF10",
+        cardForeground: String = "#FFFFFFF0",
+        popover: String = "#00000047",
+        popoverForeground: String = "#FFFFFFD6",
+        primary: String,
+        primaryForeground: String,
+        secondary: String = "#FFFFFF0F",
+        secondaryForeground: String = "#FFFFFFCC",
+        muted: String = "#FFFFFF08",
+        mutedForeground: String = "#FFFFFF8F",
+        accent: String? = nil,
+        accentForeground: String = "#FFFFFFF0",
+        success: String = "#33D175",
+        warning: String = "#FCAD59",
+        destructive: String = "#FA6478",
+        destructiveForeground: String = "#FFFFFFF0",
+        border: String = "#FFFFFF1F",
+        input: String = "#FFFFFF1F",
+        ring: String? = nil
+    ) -> WidgetThemeColors {
+        WidgetThemeColors(
+            background: background,
+            foreground: foreground,
+            card: card,
+            cardForeground: cardForeground,
+            popover: popover,
+            popoverForeground: popoverForeground,
+            primary: primary,
+            primaryForeground: primaryForeground,
+            secondary: secondary,
+            secondaryForeground: secondaryForeground,
+            muted: muted,
+            mutedForeground: mutedForeground,
+            accent: accent ?? primary.withAlpha("2E"),
+            accentForeground: accentForeground,
+            success: success,
+            warning: warning,
+            destructive: destructive,
+            destructiveForeground: destructiveForeground,
+            border: border,
+            input: input,
+            ring: ring ?? primary.withAlpha("52")
+        )
+    }
 }
 
 struct WidgetThemeTypography: Codable, Equatable {
@@ -1250,6 +1355,10 @@ final class ViewManager {
                 widget("com.skylane.capture", 0, 5),
                 widget("com.skylane.camera-preview", 5, 4),
                 widget("com.skylane.music", 9, 3)
+            ].compactMap { $0 }
+        case SavedView.focusID:
+            widgets = [
+                widget("com.skylane.pomodoro", 0, 4)
             ].compactMap { $0 }
         default:
             widgets = []

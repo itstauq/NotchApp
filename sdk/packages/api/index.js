@@ -220,9 +220,10 @@ function normalizeButtonVariant(variant) {
     case "default":
     case "primary":
       return "primary";
-    case "outline":
     case "secondary":
       return "secondary";
+    case "outline":
+      return "outline";
     case "ghost":
       return "ghost";
     case "destructive":
@@ -335,7 +336,7 @@ function Camera(props = {}) {
     ...props,
     frame: resolveFrame(props.frame, { maxWidth: Infinity, maxHeight: Infinity }),
     clipShape: props.clipShape ?? { type: "roundedRect", cornerRadius: theme.radius.lg },
-    background: props.background ?? theme.colors.surfaceCanvas,
+    background: props.background ?? theme.colors.background,
   });
 }
 
@@ -449,23 +450,23 @@ function cardSurfaceStyles(theme, variant) {
   switch (variant) {
     case "accent":
       return {
-        fill: theme.colors.surfaceAccent,
-        strokeColor: theme.colors.borderAccent,
+        fill: theme.colors.accent,
+        strokeColor: theme.colors.ring,
       };
     case "secondary":
       return {
-        fill: theme.colors.surfaceSecondary,
-        strokeColor: theme.colors.borderSecondary,
+        fill: theme.colors.secondary,
+        strokeColor: theme.colors.border,
       };
     case "ghost":
       return {
         fill: "#00000000",
-        strokeColor: theme.colors.borderSecondary,
+        strokeColor: theme.colors.border,
       };
     default:
       return {
-        fill: theme.colors.surfacePrimary,
-        strokeColor: theme.colors.borderPrimary,
+        fill: theme.colors.card,
+        strokeColor: theme.colors.border,
       };
   }
 }
@@ -474,24 +475,27 @@ function badgeStyles(theme, variant) {
   switch (variant) {
     case "secondary":
       return {
-        fill: theme.colors.surfaceSecondary,
-        strokeColor: theme.colors.borderSecondary,
+        fill: theme.colors.secondary,
+        strokeColor: theme.colors.border,
         textTone: "secondary",
-        iconColor: theme.colors.iconSecondary,
+        textColor: undefined,
+        iconColor: theme.colors.secondaryForeground,
       };
     case "outline":
       return {
         fill: "#00000000",
-        strokeColor: theme.colors.borderPrimary,
+        strokeColor: theme.colors.border,
         textTone: "secondary",
-        iconColor: theme.colors.iconSecondary,
+        textColor: undefined,
+        iconColor: theme.colors.secondaryForeground,
       };
     default:
       return {
-        fill: theme.colors.surfaceAccent,
-        strokeColor: theme.colors.borderAccent,
-        textTone: "onAccent",
-        iconColor: theme.colors.iconOnAccent,
+        fill: theme.colors.accent,
+        strokeColor: theme.colors.ring,
+        textTone: undefined,
+        textColor: theme.colors.accentForeground,
+        iconColor: theme.colors.accentForeground,
       };
   }
 }
@@ -861,6 +865,7 @@ function Badge(props = {}) {
         : React.createElement(Text, {
             variant: size === "lg" ? "label" : "caption",
             tone: styles.textTone,
+            color: styles.textColor,
             children,
           })
     )
@@ -892,7 +897,7 @@ function EmptyState(props = {}) {
           symbol,
           size: 14,
           weight: "semibold",
-          color: variant === "default" ? theme.colors.accent : theme.colors.iconTertiary,
+          color: variant === "default" ? theme.colors.primary : theme.colors.mutedForeground,
         })
       : null,
     title
@@ -977,7 +982,7 @@ function DropdownMenuTriggerButton(props = {}) {
       {
         ...rest,
         cornerRadius: theme.radius.sm,
-        fill: theme.colors.surfaceOverlay,
+        fill: theme.colors.popover,
         width: 28,
         height: 24,
       },
@@ -985,7 +990,7 @@ function DropdownMenuTriggerButton(props = {}) {
         symbol,
         size: 10,
         weight: "bold",
-        color: theme.colors.iconPrimary,
+        color: theme.colors.popoverForeground,
       })
     );
   }

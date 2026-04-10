@@ -171,6 +171,13 @@ export default function Widget() {
 }
 ```
 
+For bespoke layouts that still want semantic controls, `Button` and `IconButton` accept light-touch sizing overrides:
+
+- `Button`: `size`, `width`, `height`, `fontSize`, `cornerRadius`, `shape="pill"`
+- `IconButton`: `size`, `width`, `height`, `iconSize`, `cornerRadius`
+
+Use those sparingly when the standard control variants are close but a bespoke mock still needs tighter geometry.
+
 ## Text And Escape Hatches
 
 Use `Text variant="..."` for semantic typography:
@@ -194,6 +201,10 @@ Use `tone` for semantics, not hierarchy:
 - `onAccent`
 
 When you need something more custom, use `useTheme()` and low-level primitives such as `Stack`, `Inline`, `RoundedRect`, `Circle`, and `Icon`. Treat that as the advanced path, not the default path.
+
+Treat `useTheme().colors` like a compact semantic palette: `primary` is the solid CTA color, `accent` is the softer accent surface, and `secondary` / `muted` are the neutral translucent layers.
+
+For the full token list and how theme families map onto the old mock widgets, see [widget-theme-mapping.md](./widget-theme-mapping.md).
 
 Callback conventions:
 

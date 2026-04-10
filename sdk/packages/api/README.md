@@ -86,9 +86,15 @@ Widgets choose a manifest `theme`, and standard components resolve their styling
 
 Use `useTheme()` only when you need advanced customization or bespoke composition. Most widgets should not need manual color assignments for standard controls or surfaces.
 
+When you do need `useTheme()`, treat it as a compact semantic palette: `primary` is the strong CTA color, `accent` is the softer accent surface, and `secondary` / `muted` are neutral translucent layers.
+
+The full token list and theme-family mapping live in [widget-theme-mapping.md](../../docs/widget-theme-mapping.md).
+
 Use `Overlay` as a direct child of `Card`, `Camera`, `Section`, or other container components when you need layered affordances such as settings buttons or status badges.
 
 `Card`, `CardHeader`, `CardContent`, `CardFooter`, `Section`, `Field`, `List`, and `Toolbar` accept semantic `inset` tokens such as `none`, `sm`, and `lg` so normal widgets rarely need raw padding objects.
+
+When a bespoke mock needs custom control geometry, `Button` and `IconButton` support light-touch sizing overrides such as `size`, `width`, `height`, and `cornerRadius`. `Button` also supports `fontSize` and `shape="pill"`, and `IconButton` supports `iconSize`.
 
 For the common menu case, prefer `DropdownMenu trigger={<DropdownMenuTriggerButton ... />}>...</DropdownMenu>`. The explicit `DropdownMenuTrigger` / `DropdownMenuContent` compounds remain available for advanced composition.
 

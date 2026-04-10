@@ -1113,6 +1113,10 @@ private struct RuntimeV2NodeView: View {
                 return AnyView(text.fixedSize(horizontal: true, vertical: false))
             }
 
+            if node.value("frame") != nil {
+                return AnyView(text)
+            }
+
             return AnyView(
                 text.frame(maxWidth: .infinity, alignment: RuntimeV2StyleResolver.textFrameAlignment(node.string("alignment")))
             )
@@ -1152,22 +1156,33 @@ private struct RuntimeV2NodeView: View {
             )
         case "Button":
             let variant = node.string("variant") ?? "primary"
+            let buttonWidth = node.number("width").map { CGFloat($0) }
+            let metrics = buttonMetrics
+            let cornerRadius = CGFloat(
+                node.number("cornerRadius")
+                    ?? ((node.string("shape") ?? "default") == "pill" ? (metrics.height / 2) : 10)
+            )
             return AnyView(
                 Button {
                     guard let callbackID = node.string("onPress") else { return }
                     vm.widgetRuntime.triggerCallback(callbackID: callbackID, for: instanceID)
                 } label: {
                     Text(node.string("title") ?? "Action")
-                        .font(themedFont(for: .buttonLabel))
+                        .font(
+                            .system(
+                                size: metrics.fontSize,
+                                weight: RuntimeV2StyleResolver.fontWeight(node.string("weight"), default: .semibold)
+                            )
+                        )
                         .foregroundStyle(buttonForegroundColor(variant: variant))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: CGFloat(theme.controls.buttonHeight))
+                        .frame(maxWidth: buttonWidth == nil ? .infinity : nil)
+                        .frame(width: buttonWidth, height: metrics.height)
                         .background(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                                 .fill(buttonBackgroundColor(variant: variant))
                         )
                         .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                                 .strokeBorder(buttonBorderColor(variant: variant), lineWidth: 1)
                         )
                 }
@@ -1209,6 +1224,15 @@ private struct RuntimeV2NodeView: View {
             )
         case "IconButton":
             let variant = node.string("variant") ?? "ghost"
+            let buttonWidth = CGFloat(node.number("width") ?? iconButtonMetrics.frameSize)
+            let buttonHeight = CGFloat(node.number("height") ?? iconButtonMetrics.frameSize)
+            let iconSize = CGFloat(node.number("iconSize") ?? iconButtonMetrics.fontSize)
+            let cornerRadius = CGFloat(
+                node.number("cornerRadius")
+                    ?? ((node.string("shape") ?? "default") == "pill"
+                        ? min(buttonWidth, buttonHeight) / 2
+                        : min(buttonWidth, buttonHeight) / 2)
+            )
             return AnyView(
                 Button {
                     guard let callbackID = node.string("onPress"), !(node.bool("disabled") ?? false) else { return }
@@ -1216,10 +1240,10 @@ private struct RuntimeV2NodeView: View {
                 } label: {
                     ZStack {
                         if variant != "ghost" {
-                            Circle()
+                            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                                 .fill(iconButtonBackgroundColor(variant: variant))
                                 .overlay {
-                                    Circle()
+                                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                                         .strokeBorder(iconButtonBorderColor(variant: variant), lineWidth: 1)
                                 }
                         }
@@ -1227,13 +1251,13 @@ private struct RuntimeV2NodeView: View {
                         Image(systemName: node.string("symbol") ?? "questionmark")
                             .font(
                                 .system(
-                                    size: iconButtonMetrics.fontSize,
-                                    weight: .semibold
+                                    size: iconSize,
+                                    weight: RuntimeV2StyleResolver.fontWeight(node.string("weight"), default: .semibold)
                                 )
                             )
                             .foregroundStyle(iconColor(variant: variant))
                     }
-                    .frame(width: iconButtonMetrics.frameSize, height: iconButtonMetrics.frameSize)
+                    .frame(width: buttonWidth, height: buttonHeight)
                 }
                 .buttonStyle(.plain)
                 .disabled(node.bool("disabled") ?? false)
@@ -1245,11 +1269,11 @@ private struct RuntimeV2NodeView: View {
                     vm.widgetRuntime.triggerCallback(callbackID: callbackID, for: instanceID)
                 } label: {
                     Circle()
-                        .fill((node.bool("checked") ?? false) ? color(theme.colors.accent) : Color.clear)
+                        .fill((node.bool("checked") ?? false) ? color(theme.colors.primary) : Color.clear)
                         .overlay {
                             Circle()
                                 .strokeBorder(
-                                    (node.bool("checked") ?? false) ? color(theme.colors.borderAccent) : color(theme.colors.borderPrimary),
+                                    (node.bool("checked") ?? false) ? color(theme.colors.ring) : color(theme.colors.border),
                                     lineWidth: 1.2
                                 )
                         }
@@ -1258,7 +1282,7 @@ private struct RuntimeV2NodeView: View {
                             if node.bool("checked") ?? false {
                                 Image(systemName: "checkmark")
                                     .font(.system(size: 8, weight: .bold))
-                                    .foregroundStyle(color(theme.colors.iconOnAccent))
+                                    .foregroundStyle(color(theme.colors.primaryForeground))
                             }
                         }
                 }
@@ -1618,7 +1642,7 @@ private struct RuntimeV2NodeView: View {
         }
 
         if node.string("tone") == "accent" {
-            return color(theme.colors.accent)
+            return color(theme.colors.primary)
         }
         if node.string("tone") == "destructive" {
             return color(theme.colors.destructive)
@@ -1630,23 +1654,23 @@ private struct RuntimeV2NodeView: View {
             return color(theme.colors.success)
         }
         if node.string("tone") == "onAccent" {
-            return color(theme.colors.textOnAccent)
+            return color(theme.colors.primaryForeground)
         }
         let textVariant = node.string("variant") ?? node.string("role")
 
         if textVariant == "placeholder" {
-            return color(theme.colors.textPlaceholder)
+            return color(theme.colors.mutedForeground).opacity(0.84)
         }
 
         switch node.string("tone") {
         case "primary":
-            return color(theme.colors.textPrimary)
+            return color(theme.colors.foreground)
         case "tertiary":
-            return color(theme.colors.textTertiary)
+            return color(theme.colors.mutedForeground).opacity(0.76)
         case "secondary":
-            return color(theme.colors.textSecondary)
+            return color(theme.colors.mutedForeground)
         default:
-            return color(theme.colors.textSecondary)
+            return color(theme.colors.mutedForeground)
         }
     }
 
@@ -1657,7 +1681,7 @@ private struct RuntimeV2NodeView: View {
 
         switch node.string("tone") {
         case "accent":
-            return color(theme.colors.accent)
+            return color(theme.colors.primary)
         case "destructive":
             return color(theme.colors.destructive)
         case "warning":
@@ -1665,18 +1689,18 @@ private struct RuntimeV2NodeView: View {
         case "success":
             return color(theme.colors.success)
         case "onAccent":
-            return color(theme.colors.iconOnAccent)
+            return color(theme.colors.primaryForeground)
         default:
             break
         }
 
         switch node.string("tone") {
         case "primary":
-            return color(theme.colors.iconPrimary)
+            return color(theme.colors.foreground)
         case "tertiary":
-            return color(theme.colors.iconTertiary)
+            return color(theme.colors.mutedForeground).opacity(0.76)
         default:
-            return color(theme.colors.iconSecondary)
+            return color(theme.colors.mutedForeground)
         }
     }
 
@@ -1695,6 +1719,28 @@ private struct RuntimeV2NodeView: View {
         default:
             return (10, CGFloat(theme.controls.iconButtonSize))
         }
+    }
+
+    private var buttonMetrics: (fontSize: CGFloat, height: CGFloat) {
+        let defaultFontSize = CGFloat(theme.typography.buttonLabel.size)
+        let defaultHeight = CGFloat(theme.controls.buttonHeight)
+
+        let sizedDefaults: (fontSize: CGFloat, height: CGFloat)
+        switch node.string("size") {
+        case "sm":
+            sizedDefaults = (10, 24)
+        case "lg":
+            sizedDefaults = (12, 34)
+        case "xl":
+            sizedDefaults = (13, 38)
+        default:
+            sizedDefaults = (defaultFontSize, defaultHeight)
+        }
+
+        return (
+            CGFloat(node.number("fontSize") ?? Double(sizedDefaults.fontSize)),
+            CGFloat(node.number("height") ?? Double(sizedDefaults.height))
+        )
     }
 
     private enum ThemeTextRole {
@@ -1764,59 +1810,67 @@ private struct RuntimeV2NodeView: View {
     private func buttonBackgroundColor(variant: String) -> Color {
         switch variant {
         case "secondary":
-            return color(theme.colors.surfaceAccent)
+            return color(theme.colors.secondary)
+        case "outline":
+            return Color.clear
         case "ghost":
             return Color.clear
         case "destructive":
-            return color(theme.colors.destructive).opacity(0.18)
+            return color(theme.colors.destructive)
         default:
-            return color(theme.colors.accent)
+            return color(theme.colors.primary)
         }
     }
 
     private func buttonBorderColor(variant: String) -> Color {
         switch variant {
         case "secondary":
-            return color(theme.colors.borderAccent)
-        case "ghost":
+            return color(theme.colors.border)
+        case "outline":
+            return color(theme.colors.border)
+        case "ghost", "destructive":
             return Color.clear
-        case "destructive":
-            return color(theme.colors.destructive).opacity(0.34)
         default:
-            return color(theme.colors.accent).opacity(0.18)
+            return Color.clear
         }
     }
 
     private func buttonForegroundColor(variant: String) -> Color {
         switch variant {
         case "primary":
-            return color(theme.colors.textOnAccent)
+            return color(theme.colors.primaryForeground)
         case "destructive":
-            return color(theme.colors.destructive)
+            return color(theme.colors.destructiveForeground)
+        case "secondary":
+            return color(theme.colors.secondaryForeground)
+        case "outline", "ghost":
+            return color(theme.colors.foreground)
         default:
-            return color(theme.colors.textPrimary)
+            return color(theme.colors.foreground)
         }
     }
 
     private func rowBackgroundColor(variant: String) -> Color {
         switch variant {
         case "accent":
-            return color(theme.colors.surfaceAccent)
+            return color(theme.colors.accent)
         case "ghost":
             return Color.clear
         default:
-            return color(theme.colors.surfaceSecondary)
+            return color(theme.colors.secondary)
         }
     }
 
     private func iconColor(variant: String) -> Color {
         switch variant {
         case "primary":
-            return color(theme.colors.iconOnAccent)
+            return color(theme.colors.primaryForeground)
         case "destructive":
-            return color(theme.colors.destructive)
+            return color(theme.colors.destructiveForeground)
         case "secondary":
-            return color(theme.colors.iconSecondary)
+            return color(theme.colors.secondaryForeground)
+        case "subtle":
+            return color(theme.colors.accentForeground)
         default:
             return iconColor
         }
@@ -1825,13 +1879,13 @@ private struct RuntimeV2NodeView: View {
     private func iconButtonBackgroundColor(variant: String) -> Color {
         switch variant {
         case "primary":
-            return color(theme.colors.accent)
+            return color(theme.colors.primary)
         case "secondary":
-            return color(theme.colors.surfacePrimary)
+            return color(theme.colors.secondary)
         case "subtle":
-            return color(theme.colors.surfaceAccent)
+            return color(theme.colors.accent)
         case "destructive":
-            return color(theme.colors.destructive).opacity(0.18)
+            return color(theme.colors.destructive)
         default:
             return Color.clear
         }
@@ -1839,14 +1893,12 @@ private struct RuntimeV2NodeView: View {
 
     private func iconButtonBorderColor(variant: String) -> Color {
         switch variant {
-        case "primary":
-            return color(theme.colors.accent).opacity(0.18)
         case "secondary":
-            return color(theme.colors.borderPrimary)
+            return color(theme.colors.border)
         case "subtle":
-            return color(theme.colors.borderAccent)
-        case "destructive":
-            return color(theme.colors.destructive).opacity(0.34)
+            return color(theme.colors.ring)
+        case "primary", "destructive":
+            return Color.clear
         default:
             return Color.clear
         }
@@ -2796,11 +2848,11 @@ private struct RuntimeV2InputNodeView: View {
     }
 
     private var inputTextColor: NSColor {
-        NSColor(RuntimeV2StyleResolver.color(hex: theme.colors.textSecondary) ?? .white)
+        NSColor(RuntimeV2StyleResolver.color(hex: theme.colors.foreground) ?? .white)
     }
 
     private var inputInsertionPointColor: NSColor {
-        NSColor(RuntimeV2StyleResolver.color(hex: theme.colors.textPrimary) ?? .white)
+        NSColor(RuntimeV2StyleResolver.color(hex: theme.colors.foreground) ?? .white)
     }
 
     var body: some View {
@@ -2839,7 +2891,7 @@ private struct RuntimeV2InputNodeView: View {
 
             if let trailingAccessory = node.decoded("trailingAccessory", as: RenderNodeV2.self) {
                 Circle()
-                    .fill(RuntimeV2StyleResolver.color(hex: theme.colors.surfaceTertiary) ?? .white.opacity(0.08))
+                    .fill(RuntimeV2StyleResolver.color(hex: theme.colors.muted) ?? .white.opacity(0.08))
                     .frame(width: 24, height: 24)
                     .overlay {
                         RuntimeV2NodeView(
@@ -2858,11 +2910,11 @@ private struct RuntimeV2InputNodeView: View {
         .frame(height: CGFloat(theme.controls.inputHeight))
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(RuntimeV2StyleResolver.color(hex: theme.colors.surfacePrimary) ?? .white.opacity(0.07))
+                .fill(RuntimeV2StyleResolver.color(hex: theme.colors.card) ?? .white.opacity(0.07))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(RuntimeV2StyleResolver.color(hex: theme.colors.borderPrimary) ?? .white.opacity(0.12), lineWidth: 1)
+                .strokeBorder(RuntimeV2StyleResolver.color(hex: theme.colors.input) ?? .white.opacity(0.12), lineWidth: 1)
         )
         .onAppear {
             text = node.string("value") ?? ""

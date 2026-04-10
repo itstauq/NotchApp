@@ -1,0 +1,59 @@
+{
+  "name": "@skylane/widget-pomodoro",
+  "version": "0.1.1",
+  "private": true,
+  "scripts": {
+    "develop": "skylane develop",
+    "build": "skylane build",
+    "lint": "skylane lint"
+  },
+  "devDependencies": {
+    "skylane": "^0.1.1"
+  },
+  "dependencies": {
+    "@skylane/api": "^0.1.1"
+  },
+  "skylane": {
+    "id": "com.skylane.pomodoro",
+    "title": "Pomodoro",
+    "description": "Focus timer with breaks",
+    "icon": "timer",
+    "theme": "amber",
+    "minSpan": 3,
+    "maxSpan": 6,
+    "entry": "src/index.tsx",
+    "capabilities": {
+      "notifications": {}
+    },
+    "preferences": [
+      {
+        "name": "focusMinutes",
+        "title": "Focus Duration",
+        "description": "Length of one focus session in minutes.",
+        "type": "textfield",
+        "default": "25"
+      },
+      {
+        "name": "shortBreakMinutes",
+        "title": "Short Break",
+        "description": "Length of a short break in minutes.",
+        "type": "textfield",
+        "default": "5"
+      },
+      {
+        "name": "longBreakMinutes",
+        "title": "Long Break",
+        "description": "Length of a long break in minutes.",
+        "type": "textfield",
+        "default": "15"
+      },
+      {
+        "name": "rounds",
+        "title": "Rounds",
+        "description": "Number of focus sessions before a long break.",
+        "type": "textfield",
+        "default": "4"
+      }
+    ]
+  }
+}
