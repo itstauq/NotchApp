@@ -323,11 +323,24 @@ final class WidgetRuntimeController {
                 self?.log.write(message)
             }
         )
+        let audioService = WidgetHostAudioService(
+            onStateChange: { [weak self] instanceID, state in
+                self?.broadcastHostEvent(
+                    named: "audio.state",
+                    payload: state,
+                    instanceIDs: [instanceID]
+                )
+            },
+            log: { [weak self] message in
+                self?.log.write(message)
+            }
+        )
         hostAPI = WidgetHostAPI(
             sessionManager: sessionManager,
             storage: storageManager,
             network: WidgetHostNetworkService(),
             media: mediaService,
+            audio: audioService,
             notifications: WidgetNotificationService.shared,
             resolveWidgetID: { [weak self] instanceID in
                 self?.mountedWidgets[instanceID]?.definition.id
@@ -422,6 +435,7 @@ final class WidgetRuntimeController {
         renderTreeByInstance.removeValue(forKey: instanceID)
         errorByInstance.removeValue(forKey: instanceID)
         WidgetImagePipeline.clearCache(for: instanceID)
+        hostAPI.removeInstance(instanceID)
 
         guard let mounted, let sessionID else { return }
 
@@ -913,7 +927,11 @@ final class WidgetRuntimeController {
         }
     }
 
-    private func broadcastHostEvent<Value: Encodable>(named name: String, payload: Value) {
+    private func broadcastHostEvent<Value: Encodable>(
+        named name: String,
+        payload: Value,
+        instanceIDs: [UUID]? = nil
+    ) {
         let encodedPayload: RuntimeJSONValue
         do {
             encodedPayload = try encodeRuntimeJSONValue(payload)
@@ -922,7 +940,8 @@ final class WidgetRuntimeController {
             return
         }
 
-        for instanceID in mountedWidgets.keys {
+        let targetInstanceIDs = instanceIDs ?? Array(mountedWidgets.keys)
+        for instanceID in targetInstanceIDs {
             guard let sessionID = sessionManager.knownSessionID(for: instanceID) else {
                 continue
             }

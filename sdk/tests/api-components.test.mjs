@@ -99,6 +99,27 @@ function loadAPI() {
               };
             },
           };
+        case "./hooks/useAudio":
+          return {
+            useAudio() {
+              return {
+                playbackState: "stopped",
+                players: [],
+                isLoading: false,
+                isPending: false,
+                error: undefined,
+                refresh() {},
+                play() {},
+                pause() {},
+                togglePlayPause() {},
+                stop() {},
+                setVolume() {},
+                pauseAll() {},
+                resumeAll() {},
+                stopAll() {},
+              };
+            },
+          };
         case "./hooks/useMedia":
           return {
             useMedia() {
@@ -169,6 +190,7 @@ test("@skylane/api exports the extended non-image component surface", () => {
     "Slider",
     "usePreference",
     "useCameras",
+    "useAudio",
     "useMedia",
     "scheduleNotification",
     "cancelNotification",

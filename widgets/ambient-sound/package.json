@@ -21,6 +21,9 @@
     "theme": "green",
     "minSpan": 4,
     "maxSpan": 4,
-    "entry": "src/index.tsx"
+    "entry": "src/index.tsx",
+    "capabilities": {
+      "audio": {}
+    }
   }
 }

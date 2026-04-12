@@ -77,7 +77,7 @@ export default function Widget({ environment }) {
 - `Button`, `Row`, `IconButton`, `Checkbox`, `Input`
 - `ScrollView`, `Divider`, `Circle`, `RoundedRect`, `Camera`, `Menu`
 - `LocalStorage`
-- `useLocalStorage`, `usePreference`, `useCameras`, `useMedia`, `useTheme`, `usePromise`, `useFetch`
+- `useLocalStorage`, `usePreference`, `useCameras`, `useAudio`, `useMedia`, `useTheme`, `usePromise`, `useFetch`
 - `openURL`
 
 ## Theme, Preferences, And Host Data
@@ -108,23 +108,26 @@ Use the host data APIs in three patterns:
 
 - `usePreference("name")` for manifest-backed configuration values
 - `useCameras()` for host-backed resources with selection state
+- `useAudio()` for host-backed bundled audio playback
 - `useMedia()` for host-backed now-playing state and transport controls
 - `usePromise()` only for advanced custom async flows
 
 `useCameras()` follows the shared resource shape: `items`, `value`, `setValue`, `isLoading`, `isPending`, `error`, `refresh`.
+`useAudio()` follows the same pattern and returns `playbackState`, `players`, `isLoading`, `isPending`, `error`, `refresh`, plus `play()`, `pause()`, `togglePlayPause()`, `stop()`, `setVolume()`, `pauseAll()`, `resumeAll()`, and `stopAll()`. Audio sources must be widget-relative bundled assets such as `assets/rain.wav`.
 `useMedia()` follows the same pattern and returns media state plus `play()`, `pause()`, `togglePlayPause()`, `nextTrack()`, `previousTrack()`, and `openSourceApp()`. Media updates are pushed from the host, action methods send transport commands without locally overwriting state, and `refresh()` is available for manual re-fetches when a widget wants an explicit sync point.
 
 ```tsx
-import { Text, useCameras, useMedia, usePreference } from "@skylane/api";
+import { Text, useAudio, useCameras, useMedia, usePreference } from "@skylane/api";
 
 export default function Widget() {
   const [mailbox] = usePreference("mailbox");
+  const audio = useAudio();
   const cameras = useCameras();
   const media = useMedia();
 
   return (
     <Text variant="body">
-      {mailbox ?? "Inbox"} • {cameras.value ?? "No Camera"} • {media.item?.title ?? "Nothing Playing"}
+      {mailbox ?? "Inbox"} • {cameras.value ?? "No Camera"} • {audio.playbackState} • {media.item?.title ?? "Nothing Playing"}
     </Text>
   );
 }

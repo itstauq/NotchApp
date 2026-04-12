@@ -1,3 +1,4 @@
+import AVFoundation
 import AppKit
 import Combine
 import Foundation
@@ -39,6 +40,22 @@ struct RuntimeCancelNotificationParams: Decodable {
 
 struct RuntimeBrowserOpenParams: Decodable {
     var url: String
+}
+
+struct RuntimeAudioPlayParams: Decodable {
+    var playerId: String
+    var src: String
+    var loop: Bool?
+    var volume: Double?
+}
+
+struct RuntimeAudioPlayerIDParams: Decodable {
+    var playerId: String
+}
+
+struct RuntimeAudioSetVolumeParams: Decodable {
+    var playerId: String
+    var value: Double
 }
 
 struct RuntimeCameraSelectDeviceParams: Decodable {
@@ -1563,6 +1580,481 @@ final class WidgetHostMediaService: WidgetHostMediaHandling {
     }
 }
 
+enum WidgetHostAudioPlaybackState: String, Codable, Equatable {
+    case playing
+    case paused
+    case stopped
+}
+
+struct WidgetHostAudioPlayerState: Codable, Equatable {
+    var id: String
+    var src: String
+    var playbackState: WidgetHostAudioPlaybackState
+    var volume: Double
+    var loop: Bool
+}
+
+struct WidgetHostAudioState: Codable, Equatable {
+    var playbackState: WidgetHostAudioPlaybackState
+    var players: [WidgetHostAudioPlayerState]
+
+    static let empty = WidgetHostAudioState(
+        playbackState: .stopped,
+        players: []
+    )
+}
+
+protocol WidgetHostAudioPlayerType: AnyObject {
+    var volume: Float { get set }
+    var numberOfLoops: Int { get set }
+    var isPlaying: Bool { get }
+    var onPlaybackFinished: (() -> Void)? { get set }
+
+    func prepareToPlay() -> Bool
+    @discardableResult func play() -> Bool
+    func pause()
+    func stop()
+}
+
+private final class WidgetHostAudioPlayer: NSObject, WidgetHostAudioPlayerType, AVAudioPlayerDelegate {
+    private let player: AVAudioPlayer
+
+    var onPlaybackFinished: (() -> Void)?
+
+    var volume: Float {
+        get { player.volume }
+        set { player.volume = newValue }
+    }
+
+    var numberOfLoops: Int {
+        get { player.numberOfLoops }
+        set { player.numberOfLoops = newValue }
+    }
+
+    var isPlaying: Bool {
+        player.isPlaying
+    }
+
+    init(contentsOf url: URL) throws {
+        self.player = try AVAudioPlayer(contentsOf: url)
+        super.init()
+        player.delegate = self
+    }
+
+    func prepareToPlay() -> Bool {
+        player.prepareToPlay()
+    }
+
+    @discardableResult
+    func play() -> Bool {
+        player.play()
+    }
+
+    func pause() {
+        player.pause()
+    }
+
+    func stop() {
+        player.stop()
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        onPlaybackFinished?()
+    }
+
+    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: (any Error)?) {
+        onPlaybackFinished?()
+    }
+}
+
+private final class WidgetHostAudioSessionPlayer {
+    let player: WidgetHostAudioPlayerType
+    var state: WidgetHostAudioPlayerState
+
+    init(player: WidgetHostAudioPlayerType, state: WidgetHostAudioPlayerState) {
+        self.player = player
+        self.state = state
+    }
+}
+
+private final class WidgetHostAudioSession {
+    var players: [String: WidgetHostAudioSessionPlayer] = [:]
+    var lastPublishedState: WidgetHostAudioState?
+}
+
+@MainActor
+protocol WidgetHostAudioHandling {
+    func getState(instanceID: UUID) -> WidgetHostAudioState
+    func play(
+        widgetID: String,
+        instanceID: UUID,
+        widgetDefinition: WidgetDefinition?,
+        params: RuntimeAudioPlayParams
+    ) throws
+    func pause(instanceID: UUID, params: RuntimeAudioPlayerIDParams) throws
+    func togglePlayPause(instanceID: UUID, params: RuntimeAudioPlayerIDParams) throws
+    func stop(instanceID: UUID, params: RuntimeAudioPlayerIDParams) throws
+    func setVolume(instanceID: UUID, params: RuntimeAudioSetVolumeParams) throws
+    func pauseAll(instanceID: UUID) throws
+    func resumeAll(instanceID: UUID) throws
+    func stopAll(instanceID: UUID)
+    func removeAllPlayers(instanceID: UUID)
+}
+
+@MainActor
+final class WidgetHostAudioService: WidgetHostAudioHandling {
+    typealias PlayerFactory = @MainActor (URL) throws -> WidgetHostAudioPlayerType
+    typealias StateChangeHandler = @MainActor (UUID, WidgetHostAudioState) -> Void
+
+    private let makePlayer: PlayerFactory
+    private let fileManager: FileManager
+    private let onStateChange: StateChangeHandler?
+    private let log: (String) -> Void
+    private var sessions: [UUID: WidgetHostAudioSession] = [:]
+
+    init(
+        makePlayer: @escaping PlayerFactory = { try WidgetHostAudioPlayer(contentsOf: $0) },
+        fileManager: FileManager = .default,
+        onStateChange: StateChangeHandler? = nil,
+        log: @escaping (String) -> Void = { _ in }
+    ) {
+        self.makePlayer = makePlayer
+        self.fileManager = fileManager
+        self.onStateChange = onStateChange
+        self.log = log
+    }
+
+    func getState(instanceID: UUID) -> WidgetHostAudioState {
+        state(for: sessions[instanceID])
+    }
+
+    func play(
+        widgetID: String,
+        instanceID: UUID,
+        widgetDefinition: WidgetDefinition?,
+        params: RuntimeAudioPlayParams
+    ) throws {
+        let playerID = try normalizedPlayerID(params.playerId)
+        let src = try normalizedSource(params.src)
+        let volume = clampedVolume(params.volume)
+        let loop = params.loop == true
+        let assetURL = try resolvedAssetURL(
+            widgetID: widgetID,
+            widgetDefinition: widgetDefinition,
+            source: src
+        )
+
+        let session = session(for: instanceID)
+        if let existing = session.players[playerID],
+           existing.state.src != src {
+            existing.player.onPlaybackFinished = nil
+            existing.player.stop()
+            session.players.removeValue(forKey: playerID)
+        }
+
+        if let existing = session.players[playerID] {
+            configure(existing, src: src, volume: volume, loop: loop)
+            attachPlaybackFinishHandler(to: existing.player, instanceID: instanceID, playerID: playerID)
+            guard existing.player.isPlaying || existing.player.play() else {
+                throw playbackStartError(for: playerID)
+            }
+            existing.state.playbackState = .playing
+            publishIfNeeded(instanceID)
+            return
+        }
+
+        let player = try makePlayer(assetURL)
+        _ = player.prepareToPlay()
+        player.volume = Float(volume)
+        player.numberOfLoops = loop ? -1 : 0
+        attachPlaybackFinishHandler(to: player, instanceID: instanceID, playerID: playerID)
+        guard player.play() else {
+            throw playbackStartError(for: playerID)
+        }
+
+        session.players[playerID] = WidgetHostAudioSessionPlayer(
+            player: player,
+            state: WidgetHostAudioPlayerState(
+                id: playerID,
+                src: src,
+                playbackState: .playing,
+                volume: volume,
+                loop: loop
+            )
+        )
+        publishIfNeeded(instanceID)
+    }
+
+    func pause(instanceID: UUID, params: RuntimeAudioPlayerIDParams) throws {
+        let playerID = try normalizedPlayerID(params.playerId)
+        guard let sessionPlayer = sessions[instanceID]?.players[playerID] else {
+            return
+        }
+
+        sessionPlayer.player.pause()
+        sessionPlayer.state.playbackState = .paused
+        publishIfNeeded(instanceID)
+    }
+
+    func togglePlayPause(instanceID: UUID, params: RuntimeAudioPlayerIDParams) throws {
+        let playerID = try normalizedPlayerID(params.playerId)
+        guard let sessionPlayer = sessions[instanceID]?.players[playerID] else {
+            return
+        }
+
+        if sessionPlayer.state.playbackState == .playing {
+            sessionPlayer.player.pause()
+            sessionPlayer.state.playbackState = .paused
+        } else {
+            guard sessionPlayer.player.play() else {
+                throw playbackStartError(for: playerID)
+            }
+            sessionPlayer.state.playbackState = .playing
+        }
+
+        publishIfNeeded(instanceID)
+    }
+
+    func stop(instanceID: UUID, params: RuntimeAudioPlayerIDParams) throws {
+        let playerID = try normalizedPlayerID(params.playerId)
+        guard let session = sessions[instanceID],
+              let sessionPlayer = session.players.removeValue(forKey: playerID) else {
+            return
+        }
+
+        sessionPlayer.player.onPlaybackFinished = nil
+        sessionPlayer.player.stop()
+        publishIfNeeded(instanceID)
+        pruneSessionIfEmpty(instanceID)
+    }
+
+    func setVolume(instanceID: UUID, params: RuntimeAudioSetVolumeParams) throws {
+        let playerID = try normalizedPlayerID(params.playerId)
+        guard let sessionPlayer = sessions[instanceID]?.players[playerID] else {
+            return
+        }
+
+        let volume = clampedVolume(params.value)
+        sessionPlayer.player.volume = Float(volume)
+        sessionPlayer.state.volume = volume
+        publishIfNeeded(instanceID)
+    }
+
+    func pauseAll(instanceID: UUID) throws {
+        guard let session = sessions[instanceID] else {
+            return
+        }
+
+        for sessionPlayer in session.players.values {
+            sessionPlayer.player.pause()
+            sessionPlayer.state.playbackState = .paused
+        }
+
+        publishIfNeeded(instanceID)
+    }
+
+    func resumeAll(instanceID: UUID) throws {
+        guard let session = sessions[instanceID] else {
+            return
+        }
+
+        for (playerID, sessionPlayer) in session.players {
+            if sessionPlayer.state.playbackState == .playing {
+                continue
+            }
+
+            guard sessionPlayer.player.play() else {
+                throw playbackStartError(for: playerID)
+            }
+            sessionPlayer.state.playbackState = .playing
+        }
+
+        publishIfNeeded(instanceID)
+    }
+
+    func stopAll(instanceID: UUID) {
+        guard let session = sessions[instanceID] else {
+            return
+        }
+
+        for sessionPlayer in session.players.values {
+            sessionPlayer.player.onPlaybackFinished = nil
+            sessionPlayer.player.stop()
+        }
+        session.players.removeAll()
+        publishIfNeeded(instanceID)
+        sessions.removeValue(forKey: instanceID)
+    }
+
+    func removeAllPlayers(instanceID: UUID) {
+        guard let session = sessions.removeValue(forKey: instanceID) else {
+            return
+        }
+
+        for sessionPlayer in session.players.values {
+            sessionPlayer.player.onPlaybackFinished = nil
+            sessionPlayer.player.stop()
+        }
+    }
+
+    private func session(for instanceID: UUID) -> WidgetHostAudioSession {
+        if let session = sessions[instanceID] {
+            return session
+        }
+
+        let session = WidgetHostAudioSession()
+        sessions[instanceID] = session
+        return session
+    }
+
+    private func configure(
+        _ sessionPlayer: WidgetHostAudioSessionPlayer,
+        src: String,
+        volume: Double,
+        loop: Bool
+    ) {
+        sessionPlayer.player.volume = Float(volume)
+        sessionPlayer.player.numberOfLoops = loop ? -1 : 0
+        sessionPlayer.state.src = src
+        sessionPlayer.state.volume = volume
+        sessionPlayer.state.loop = loop
+    }
+
+    private func attachPlaybackFinishHandler(
+        to player: WidgetHostAudioPlayerType,
+        instanceID: UUID,
+        playerID: String
+    ) {
+        player.onPlaybackFinished = { [weak self] in
+            Task { @MainActor in
+                self?.handlePlaybackFinished(instanceID: instanceID, playerID: playerID)
+            }
+        }
+    }
+
+    private func state(for session: WidgetHostAudioSession?) -> WidgetHostAudioState {
+        guard let session, !session.players.isEmpty else {
+            return .empty
+        }
+
+        let players = session.players.values
+            .map(\.state)
+            .sorted { $0.id < $1.id }
+        let playbackState: WidgetHostAudioPlaybackState
+        if players.contains(where: { $0.playbackState == .playing }) {
+            playbackState = .playing
+        } else {
+            playbackState = .paused
+        }
+
+        return WidgetHostAudioState(
+            playbackState: playbackState,
+            players: players
+        )
+    }
+
+    private func publishIfNeeded(_ instanceID: UUID) {
+        let nextState = state(for: sessions[instanceID])
+        if sessions[instanceID]?.lastPublishedState == nextState {
+            return
+        }
+
+        sessions[instanceID]?.lastPublishedState = nextState
+        onStateChange?(instanceID, nextState)
+    }
+
+    private func handlePlaybackFinished(instanceID: UUID, playerID: String) {
+        guard let session = sessions[instanceID],
+              let sessionPlayer = session.players.removeValue(forKey: playerID) else {
+            return
+        }
+
+        sessionPlayer.player.onPlaybackFinished = nil
+        publishIfNeeded(instanceID)
+        pruneSessionIfEmpty(instanceID)
+    }
+
+    private func pruneSessionIfEmpty(_ instanceID: UUID) {
+        if sessions[instanceID]?.players.isEmpty == true {
+            sessions.removeValue(forKey: instanceID)
+        }
+    }
+
+    private func normalizedPlayerID(_ rawValue: String) throws -> String {
+        let playerID = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !playerID.isEmpty else {
+            throw RuntimeTransportRPCError(
+                code: -32602,
+                message: "Audio playerId must be a non-empty string.",
+                data: nil
+            )
+        }
+
+        return playerID
+    }
+
+    private func normalizedSource(_ rawValue: String) throws -> String {
+        let source = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !source.isEmpty else {
+            throw RuntimeTransportRPCError(
+                code: -32602,
+                message: "Audio src must be a non-empty string.",
+                data: nil
+            )
+        }
+
+        return source
+    }
+
+    private func resolvedAssetURL(
+        widgetID: String,
+        widgetDefinition: WidgetDefinition?,
+        source: String
+    ) throws -> URL {
+        guard let widgetDefinition else {
+            throw RuntimeTransportRPCError(
+                code: -32000,
+                message: "Widget definition for '\(widgetID)' is unavailable.",
+                data: nil
+            )
+        }
+
+        guard let assetURL = widgetDefinition.assetURL(for: source) else {
+            throw RuntimeTransportRPCError(
+                code: -32602,
+                message: "Audio src must be a widget-relative asset path.",
+                data: nil
+            )
+        }
+
+        guard fileManager.fileExists(atPath: assetURL.path) else {
+            throw RuntimeTransportRPCError(
+                code: -32602,
+                message: "Audio asset '\(source)' was not found in the widget build output.",
+                data: nil
+            )
+        }
+
+        return assetURL
+    }
+
+    private func clampedVolume(_ value: Double?) -> Double {
+        clampedVolume(value ?? 1)
+    }
+
+    private func clampedVolume(_ value: Double) -> Double {
+        min(max(value, 0), 1)
+    }
+
+    private func playbackStartError(for playerID: String) -> RuntimeTransportRPCError {
+        RuntimeTransportRPCError(
+            code: -32031,
+            message: "Failed to start audio playback for player '\(playerID)'.",
+            data: nil
+        )
+    }
+}
+
 @MainActor
 struct WidgetHostNotificationRequest: Equatable {
     var widgetID: String
@@ -1907,6 +2399,7 @@ final class WidgetHostAPI {
     private let storage: WidgetHostLocalStorageHandling
     private let network: WidgetHostNetworkHandling
     private let media: WidgetHostMediaHandling
+    private let audio: WidgetHostAudioHandling
     private let notifications: WidgetHostNotificationHandling?
     private let resolveWidgetID: (UUID) -> String?
     private let resolveWidgetDefinition: (UUID) -> WidgetDefinition?
@@ -1919,16 +2412,19 @@ final class WidgetHostAPI {
         storage: WidgetHostLocalStorageHandling,
         network: WidgetHostNetworkHandling,
         media: WidgetHostMediaHandling? = nil,
+        audio: WidgetHostAudioHandling? = nil,
         notifications: WidgetHostNotificationHandling? = nil,
         resolveWidgetID: @escaping (UUID) -> String?,
         resolveWidgetDefinition: @escaping (UUID) -> WidgetDefinition? = { _ in nil },
         log: @escaping (String) -> Void = { _ in }
     ) {
         let resolvedMedia = media ?? WidgetHostMediaService(log: log)
+        let resolvedAudio = audio ?? WidgetHostAudioService(log: log)
         self.sessionManager = sessionManager
         self.storage = storage
         self.network = network
         self.media = resolvedMedia
+        self.audio = resolvedAudio
         self.notifications = notifications
         self.resolveWidgetID = resolveWidgetID
         self.resolveWidgetDefinition = resolveWidgetDefinition
@@ -1985,7 +2481,7 @@ final class WidgetHostAPI {
             value = try await route(
                 widgetDefinition: widgetDefinition,
                 widgetID: widgetID,
-                instanceID: rpcRequest.instanceId,
+                instanceID: instanceID,
                 method: rpcRequest.method,
                 params: rpcRequest.params
             )
@@ -2011,7 +2507,7 @@ final class WidgetHostAPI {
     private func route(
         widgetDefinition: WidgetDefinition?,
         widgetID: String,
-        instanceID: String,
+        instanceID: UUID,
         method: String,
         params: RuntimeJSONValue?
     ) async throws -> RuntimeJSONValue {
@@ -2019,7 +2515,7 @@ final class WidgetHostAPI {
         case "localStorage.allItems", "localStorage.setItem", "localStorage.removeItem":
             return try storage.handleRPC(
                 widgetID: widgetID,
-                instanceID: instanceID,
+                instanceID: instanceID.uuidString,
                 method: method,
                 params: params
             )
@@ -2027,7 +2523,7 @@ final class WidgetHostAPI {
             let fetchParams = try decode(params, as: RuntimeFetchRequestParams.self)
             let context = WidgetHostNetworkContext(
                 widgetID: widgetID,
-                instanceID: instanceID,
+                instanceID: instanceID.uuidString,
                 kind: .fetch
             )
             return try encodeRuntimeJSONValue(try await network.fetch(fetchParams, context: context))
@@ -2039,7 +2535,7 @@ final class WidgetHostAPI {
             let openParams = try decode(params, as: RuntimeBrowserOpenParams.self)
             let context = WidgetHostNetworkContext(
                 widgetID: widgetID,
-                instanceID: instanceID,
+                instanceID: instanceID.uuidString,
                 kind: .openURL
             )
             try network.open(openParams, context: context)
@@ -2048,21 +2544,19 @@ final class WidgetHostAPI {
             let preferenceParams = try decode(params, as: RuntimeSetPreferenceValueParams.self)
             try storage.setPreferenceValue(
                 widgetID: widgetID,
-                instanceID: instanceID,
+                instanceID: instanceID.uuidString,
                 name: preferenceParams.name,
                 value: preferenceParams.value
             )
-            if let uuid = UUID(uuidString: instanceID) {
-                NotificationCenter.default.post(
-                    name: .widgetPreferencesDidChange,
-                    object: WidgetPreferencesDidChangePayload(instanceID: uuid)
-                )
-            }
+            NotificationCenter.default.post(
+                name: .widgetPreferencesDidChange,
+                object: WidgetPreferencesDidChangePayload(instanceID: instanceID)
+            )
             return .null
         case "camera.listDevices":
             let selectedCameraID = resolvedPreferenceValues(
                 widgetID: widgetID,
-                instanceID: instanceID
+                instanceID: instanceID.uuidString
             )[cameraDevicePreferenceName]?.stringValue
             return try encodeRuntimeJSONValue(
                 WidgetCameraRegistry.shared.availableDevices(selectedDeviceID: selectedCameraID)
@@ -2071,16 +2565,14 @@ final class WidgetHostAPI {
             let cameraParams = try decode(params, as: RuntimeCameraSelectDeviceParams.self)
             try storage.setPreferenceValue(
                 widgetID: widgetID,
-                instanceID: instanceID,
+                instanceID: instanceID.uuidString,
                 name: cameraDevicePreferenceName,
                 value: RuntimeJSONValue.string(cameraParams.id)
             )
-            if let uuid = UUID(uuidString: instanceID) {
-                NotificationCenter.default.post(
-                    name: .widgetPreferencesDidChange,
-                    object: WidgetPreferencesDidChangePayload(instanceID: uuid)
-                )
-            }
+            NotificationCenter.default.post(
+                name: .widgetPreferencesDidChange,
+                object: WidgetPreferencesDidChangePayload(instanceID: instanceID)
+            )
             return .null
         case "media.getState":
             return try encodeRuntimeJSONValue(try await media.getState())
@@ -2101,6 +2593,78 @@ final class WidgetHostAPI {
             return .null
         case "media.openSourceApp":
             try await media.openSourceApp()
+            return .null
+        case "audio.getState":
+            try requireAudioCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            return try encodeRuntimeJSONValue(audio.getState(instanceID: instanceID))
+        case "audio.play":
+            try requireAudioCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            let audioParams = try decode(params, as: RuntimeAudioPlayParams.self)
+            try audio.play(
+                widgetID: widgetID,
+                instanceID: instanceID,
+                widgetDefinition: widgetDefinition,
+                params: audioParams
+            )
+            return .null
+        case "audio.pause":
+            try requireAudioCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            let audioParams = try decode(params, as: RuntimeAudioPlayerIDParams.self)
+            try audio.pause(instanceID: instanceID, params: audioParams)
+            return .null
+        case "audio.togglePlayPause":
+            try requireAudioCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            let audioParams = try decode(params, as: RuntimeAudioPlayerIDParams.self)
+            try audio.togglePlayPause(instanceID: instanceID, params: audioParams)
+            return .null
+        case "audio.stop":
+            try requireAudioCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            let audioParams = try decode(params, as: RuntimeAudioPlayerIDParams.self)
+            try audio.stop(instanceID: instanceID, params: audioParams)
+            return .null
+        case "audio.setVolume":
+            try requireAudioCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            let audioParams = try decode(params, as: RuntimeAudioSetVolumeParams.self)
+            try audio.setVolume(instanceID: instanceID, params: audioParams)
+            return .null
+        case "audio.pauseAll":
+            try requireAudioCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            try audio.pauseAll(instanceID: instanceID)
+            return .null
+        case "audio.resumeAll":
+            try requireAudioCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            try audio.resumeAll(instanceID: instanceID)
+            return .null
+        case "audio.stopAll":
+            try requireAudioCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            audio.stopAll(instanceID: instanceID)
             return .null
         case "notifications.schedule":
             guard let notifications else {
@@ -2123,17 +2687,17 @@ final class WidgetHostAPI {
 
             guard notificationsEnabled(
                 widgetID: widgetID,
-                instanceID: instanceID
+                instanceID: instanceID.uuidString
             ) else {
                 log("Widget notifications: skipped scheduling for \(widgetID)/\(instanceID) because this widget instance has notifications disabled.")
-                await notifications.cancelAllNotifications(widgetID: widgetID, instanceID: instanceID)
+                await notifications.cancelAllNotifications(widgetID: widgetID, instanceID: instanceID.uuidString)
                 return .null
             }
 
             try await notifications.schedule(
                 notificationRequest(
                     widgetID: widgetID,
-                    instanceID: instanceID,
+                    instanceID: instanceID.uuidString,
                     params: notificationParams
                 )
             )
@@ -2153,7 +2717,7 @@ final class WidgetHostAPI {
             let notificationParams = try decode(params, as: RuntimeCancelNotificationParams.self)
             await notifications.cancel(
                 widgetID: widgetID,
-                instanceID: instanceID,
+                instanceID: instanceID.uuidString,
                 notificationID: notificationParams.id
             )
             return .null
@@ -2232,6 +2796,21 @@ final class WidgetHostAPI {
         )
     }
 
+    private func requireAudioCapability(
+        for widgetID: String,
+        widgetDefinition: WidgetDefinition?
+    ) throws {
+        if widgetDefinition?.supportsAudio == true {
+            return
+        }
+
+        throw RuntimeTransportRPCError(
+            code: -32030,
+            message: "Widget '\(widgetID)' does not declare audio support.",
+            data: nil
+        )
+    }
+
     private func notificationsEnabled(
         widgetID: String,
         instanceID: String
@@ -2285,5 +2864,9 @@ final class WidgetHostAPI {
             body: body?.isEmpty == false ? body : nil,
             deliverAt: Date(timeIntervalSince1970: params.deliverAtMs / 1000)
         )
+    }
+
+    func removeInstance(_ instanceID: UUID) {
+        audio.removeAllPlayers(instanceID: instanceID)
     }
 }

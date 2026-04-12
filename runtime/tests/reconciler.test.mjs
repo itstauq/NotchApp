@@ -1076,6 +1076,257 @@ test("useMedia applies pushed host media state updates without waiting for polli
   assert.deepEqual(rpcCalls, ["media.getState"]);
 });
 
+test("useAudio exposes host audio state and action methods", async () => {
+  resetMockRuntime();
+
+  const pausedState = {
+    playbackState: "paused",
+    players: [
+      {
+        id: "rain",
+        src: "assets/rain.wav",
+        playbackState: "paused",
+        volume: 0.5,
+        loop: true,
+      },
+    ],
+  };
+  const playingState = {
+    playbackState: "playing",
+    players: [
+      {
+        id: "rain",
+        src: "assets/rain.wav",
+        playbackState: "playing",
+        volume: 0.75,
+        loop: true,
+      },
+      {
+        id: "waves",
+        src: "assets/waves.wav",
+        playbackState: "playing",
+        volume: 0.4,
+        loop: true,
+      },
+    ],
+  };
+  const rpcCalls = [];
+  rpcHandler = async (method, params) => {
+    rpcCalls.push({ method, params });
+
+    if (method === "audio.getState") {
+      return pausedState;
+    }
+
+    return null;
+  };
+
+  const renderer = createRenderer();
+  const commits = [];
+  renderer.onCommit((payload) => {
+    commits.push(payload);
+  });
+
+  function AudioWidget() {
+    const audio = api.useAudio();
+    return React.createElement(
+      "Stack",
+      null,
+      React.createElement("Text", null, audio.playbackState),
+      React.createElement("Text", null, String(audio.players.length)),
+      React.createElement("Button", {
+        title: "Play Rain",
+        onPress: () => {
+          audio.play({
+            playerId: "rain",
+            src: "assets/rain.wav",
+            loop: true,
+            volume: 0.75,
+          });
+        },
+      }),
+      React.createElement("Button", {
+        title: "Pause All",
+        onPress: () => {
+          audio.pauseAll();
+        },
+      }),
+      React.createElement("Button", {
+        title: "Set Waves",
+        onPress: () => {
+          audio.setVolume("waves", 0.4);
+        },
+      })
+    );
+  }
+
+  renderer.render(React.createElement(AudioWidget));
+  await flushEffects();
+  await flushEffects();
+  renderer.emitFullTree();
+
+  let tree = commits.at(-1).data;
+  assert.equal(tree.children[0].props.text, "paused");
+  assert.equal(tree.children[1].props.text, "1");
+
+  invokeCallback(tree.children[2].props.onPress);
+  invokeCallback(tree.children[3].props.onPress);
+  invokeCallback(tree.children[4].props.onPress);
+  await flushEffects();
+  await flushEffects();
+
+  emitMockHostEvent("audio.state", playingState);
+  await flushEffects();
+  renderer.emitFullTree();
+
+  tree = commits.at(-1).data;
+  assert.equal(tree.children[0].props.text, "playing");
+  assert.equal(tree.children[1].props.text, "2");
+  assert.deepEqual(rpcCalls, [
+    { method: "audio.getState", params: {} },
+    {
+      method: "audio.play",
+      params: {
+        playerId: "rain",
+        src: "assets/rain.wav",
+        loop: true,
+        volume: 0.75,
+      },
+    },
+    { method: "audio.pauseAll", params: {} },
+    {
+      method: "audio.setVolume",
+      params: {
+        playerId: "waves",
+        value: 0.4,
+      },
+    },
+  ]);
+});
+
+test("useAudio does not poll automatically after the initial getState", async () => {
+  resetMockRuntime();
+
+  let getStateCallCount = 0;
+  rpcHandler = async (method) => {
+    if (method !== "audio.getState") {
+      throw new Error(`Unexpected RPC: ${method}`);
+    }
+
+    getStateCallCount += 1;
+    return {
+      playbackState: "paused",
+      players: [
+        {
+          id: "rain",
+          src: "assets/rain.wav",
+          playbackState: "paused",
+          volume: getStateCallCount === 1 ? 0.25 : 0.75,
+          loop: true,
+        },
+      ],
+    };
+  };
+
+  const renderer = createRenderer();
+  const commits = [];
+  renderer.onCommit((payload) => {
+    commits.push(payload);
+  });
+
+  function AudioWidget() {
+    const audio = api.useAudio();
+    return React.createElement("Text", null, String(audio.players[0]?.volume ?? "missing"));
+  }
+
+  renderer.render(React.createElement(AudioWidget));
+  await flushEffects();
+  await flushEffects();
+  renderer.emitFullTree();
+
+  let tree = commits.at(-1).data;
+  assert.equal(tree.props.text, "0.25");
+
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  await flushEffects();
+  await flushEffects();
+  renderer.emitFullTree();
+
+  tree = commits.at(-1).data;
+  assert.equal(tree.props.text, "0.25");
+  assert.equal(getStateCallCount, 1);
+
+  renderer.render(React.createElement("Text", null, "done"));
+  await flushEffects();
+});
+
+test("useAudio suppresses unhandled rejections for ignored action promises", async () => {
+  resetMockRuntime();
+
+  const unhandledRejections = [];
+  const handleUnhandledRejection = (error) => {
+    unhandledRejections.push(error);
+  };
+  process.on("unhandledRejection", handleUnhandledRejection);
+
+  try {
+    rpcHandler = async (method) => {
+      if (method === "audio.getState") {
+        return {
+          playbackState: "stopped",
+          players: [],
+        };
+      }
+
+      if (method === "audio.pauseAll") {
+        throw new Error("Audio unavailable");
+      }
+
+      throw new Error(`Unexpected RPC: ${method}`);
+    };
+
+    const renderer = createRenderer();
+    const commits = [];
+    renderer.onCommit((payload) => {
+      commits.push(payload);
+    });
+
+    function AudioWidget() {
+      const audio = api.useAudio();
+      return React.createElement(
+        "Stack",
+        null,
+        React.createElement("Text", null, audio.error?.message ?? "ok"),
+        React.createElement("Button", {
+          title: "Pause All",
+          onPress: () => {
+            audio.pauseAll();
+          },
+        })
+      );
+    }
+
+    renderer.render(React.createElement(AudioWidget));
+    await flushEffects();
+    await flushEffects();
+    renderer.emitFullTree();
+
+    let tree = commits.at(-1).data;
+    assert.equal(tree.children[0].props.text, "ok");
+
+    invokeCallback(tree.children[1].props.onPress);
+    await flushEffects();
+    await flushEffects();
+    renderer.emitFullTree();
+
+    tree = commits.at(-1).data;
+    assert.equal(tree.children[0].props.text, "Audio unavailable");
+    assert.deepEqual(unhandledRejections, []);
+  } finally {
+    process.off("unhandledRejection", handleUnhandledRejection);
+  }
+});
+
 test("reconciler preserves stable node ids across keyed reorders", () => {
   const renderer = createRenderer();
   const commits = [];

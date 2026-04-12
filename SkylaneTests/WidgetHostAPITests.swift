@@ -5,6 +5,54 @@ import UserNotifications
 
 @MainActor
 final class WidgetHostAPITests: XCTestCase {
+    func testWidgetManifestDecodesAudioCapabilityFromCapabilitiesBlock() throws {
+        let data = Data(
+            """
+            {
+              "name": "@skylane/widget-demo",
+              "version": "0.1.0",
+              "skylane": {
+                "id": "demo.widget",
+                "title": "Demo",
+                "icon": "speaker.wave.2.fill",
+                "minSpan": 3,
+                "maxSpan": 6,
+                "capabilities": {
+                  "audio": {}
+                }
+              }
+            }
+            """.utf8
+        )
+
+        let manifest = try JSONDecoder().decode(WidgetManifest.self, from: data)
+
+        XCTAssertNotNil(manifest.skylane.capabilities?.audio)
+    }
+
+    func testWidgetManifestStillDecodesLegacyAudioAlias() throws {
+        let data = Data(
+            """
+            {
+              "name": "@skylane/widget-demo",
+              "version": "0.1.0",
+              "skylane": {
+                "id": "demo.widget",
+                "title": "Demo",
+                "icon": "speaker.wave.2.fill",
+                "minSpan": 3,
+                "maxSpan": 6,
+                "audio": {}
+              }
+            }
+            """.utf8
+        )
+
+        let manifest = try JSONDecoder().decode(WidgetManifest.self, from: data)
+
+        XCTAssertNotNil(manifest.skylane.resolvedCapabilities?.audio)
+    }
+
     func testWidgetManifestDecodesNotificationCapabilityFromCapabilitiesBlock() throws {
         let data = Data(
             """
@@ -503,6 +551,378 @@ final class WidgetHostAPITests: XCTestCase {
             ])
         )
         XCTAssertEqual(media.invokedMethods, ["openSourceApp"])
+    }
+
+    func testHandleRoutesAudioStateRPCThroughWidgetHostAPI() async throws {
+        let sessionManager = WidgetSessionManager()
+        let storage = TestStorageHandler(result: .null)
+        let network = TestNetworkHandler()
+        let audio = TestAudioHandler()
+        let instanceID = UUID()
+        let definition = makeWidgetDefinition(id: "demo.widget", supportsAudio: true)
+        sessionManager.beginMount(instanceID: instanceID)
+
+        let pausedState = WidgetHostAudioState(
+            playbackState: .paused,
+            players: [
+                WidgetHostAudioPlayerState(
+                    id: "rain",
+                    src: "assets/rain.wav",
+                    playbackState: .paused,
+                    volume: 0.5,
+                    loop: true
+                )
+            ]
+        )
+        audio.stateByInstance[instanceID] = pausedState
+
+        let api = WidgetHostAPI(
+            sessionManager: sessionManager,
+            storage: storage,
+            network: network,
+            audio: audio,
+            resolveWidgetID: { id in
+                id == instanceID ? "demo.widget" : nil
+            },
+            resolveWidgetDefinition: { id in
+                id == instanceID ? definition : nil
+            }
+        )
+
+        let response = try await api.handle(
+            RuntimeTransportRequest(
+                id: "1",
+                method: "rpc",
+                params: .object([
+                    "instanceId": .string(instanceID.uuidString),
+                    "sessionId": .string("session-1"),
+                    "method": .string("audio.getState"),
+                    "params": .object([:])
+                ])
+            )
+        )
+
+        let decoded = try XCTUnwrap(response).decode(as: DecodedRPCResponse<WidgetHostAudioState>.self)
+        XCTAssertEqual(decoded.sessionId, "session-1")
+        XCTAssertEqual(decoded.value, pausedState)
+        XCTAssertEqual(audio.invokedMethods, ["getState"])
+    }
+
+    func testHandleRoutesAudioPlayRPCThroughWidgetHostAPI() async throws {
+        let sessionManager = WidgetSessionManager()
+        let storage = TestStorageHandler(result: .null)
+        let network = TestNetworkHandler()
+        let audio = TestAudioHandler()
+        let instanceID = UUID()
+        let definition = makeWidgetDefinition(id: "demo.widget", supportsAudio: true)
+        sessionManager.beginMount(instanceID: instanceID)
+
+        let api = WidgetHostAPI(
+            sessionManager: sessionManager,
+            storage: storage,
+            network: network,
+            audio: audio,
+            resolveWidgetID: { id in
+                id == instanceID ? "demo.widget" : nil
+            },
+            resolveWidgetDefinition: { id in
+                id == instanceID ? definition : nil
+            }
+        )
+
+        let response = try await api.handle(
+            RuntimeTransportRequest(
+                id: "1",
+                method: "rpc",
+                params: .object([
+                    "instanceId": .string(instanceID.uuidString),
+                    "sessionId": .string("session-1"),
+                    "method": .string("audio.play"),
+                    "params": .object([
+                        "playerId": .string("rain"),
+                        "src": .string("assets/rain.wav"),
+                        "loop": .bool(true),
+                        "volume": .number(0.75)
+                    ])
+                ])
+            )
+        )
+
+        XCTAssertEqual(
+            response,
+            .object([
+                "sessionId": .string("session-1"),
+                "value": .null
+            ])
+        )
+        XCTAssertEqual(audio.invokedMethods, ["play"])
+        XCTAssertEqual(audio.playCalls.count, 1)
+        XCTAssertEqual(audio.playCalls.first?.widgetID, "demo.widget")
+        XCTAssertEqual(audio.playCalls.first?.instanceID, instanceID)
+        XCTAssertEqual(audio.playCalls.first?.params.playerId, "rain")
+        XCTAssertEqual(audio.playCalls.first?.params.src, "assets/rain.wav")
+        XCTAssertEqual(audio.playCalls.first?.params.loop, true)
+        XCTAssertEqual(audio.playCalls.first?.params.volume, 0.75)
+        XCTAssertEqual(audio.playCalls.first?.widgetDefinition?.id, definition.id)
+    }
+
+    func testHandleRejectsAudioRPCForUndeclaredWidgets() async {
+        let sessionManager = WidgetSessionManager()
+        let storage = TestStorageHandler(result: .null)
+        let network = TestNetworkHandler()
+        let audio = TestAudioHandler()
+        let instanceID = UUID()
+        let definition = makeWidgetDefinition(id: "demo.widget", supportsAudio: false)
+        sessionManager.beginMount(instanceID: instanceID)
+
+        let api = WidgetHostAPI(
+            sessionManager: sessionManager,
+            storage: storage,
+            network: network,
+            audio: audio,
+            resolveWidgetID: { id in
+                id == instanceID ? "demo.widget" : nil
+            },
+            resolveWidgetDefinition: { id in
+                id == instanceID ? definition : nil
+            }
+        )
+
+        do {
+            _ = try await api.handle(
+                RuntimeTransportRequest(
+                    id: "1",
+                    method: "rpc",
+                    params: .object([
+                        "instanceId": .string(instanceID.uuidString),
+                        "sessionId": .string("session-1"),
+                        "method": .string("audio.play"),
+                        "params": .object([
+                            "playerId": .string("rain"),
+                            "src": .string("assets/rain.wav")
+                        ])
+                    ])
+                )
+            )
+            XCTFail("Expected undeclared widget audio to be rejected")
+        } catch let error as RuntimeTransportRPCError {
+            XCTAssertEqual(error.code, -32030)
+            XCTAssertTrue(audio.invokedMethods.isEmpty)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testAudioServiceRejectsInvalidOrEscapingAssetPaths() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        try FileManager.default.createDirectory(
+            at: rootURL.appendingPathComponent(".skylane/build/assets", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        let definition = makeWidgetDefinition(
+            id: "demo.widget",
+            supportsAudio: true,
+            packageDirectoryURL: rootURL
+        )
+        let service = WidgetHostAudioService(
+            makePlayer: { _ in TestAudioPlayer() },
+            log: { _ in }
+        )
+
+        XCTAssertThrowsError(
+            try service.play(
+                widgetID: definition.id,
+                instanceID: UUID(),
+                widgetDefinition: definition,
+                params: RuntimeAudioPlayParams(
+                    playerId: "rain",
+                    src: "../secret.wav",
+                    loop: true,
+                    volume: 0.5
+                )
+            )
+        ) { error in
+            XCTAssertEqual((error as? RuntimeTransportRPCError)?.code, -32602)
+        }
+
+        XCTAssertThrowsError(
+            try service.play(
+                widgetID: definition.id,
+                instanceID: UUID(),
+                widgetDefinition: definition,
+                params: RuntimeAudioPlayParams(
+                    playerId: "rain",
+                    src: "/tmp/secret.wav",
+                    loop: true,
+                    volume: 0.5
+                )
+            )
+        ) { error in
+            XCTAssertEqual((error as? RuntimeTransportRPCError)?.code, -32602)
+        }
+    }
+
+    func testAudioServiceTracksMultiplePlayersAndControlsPerInstance() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let assetsURL = rootURL.appendingPathComponent(".skylane/build/assets", isDirectory: true)
+        try FileManager.default.createDirectory(at: assetsURL, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: assetsURL.appendingPathComponent("rain.wav").path, contents: Data())
+        FileManager.default.createFile(atPath: assetsURL.appendingPathComponent("waves.wav").path, contents: Data())
+
+        let definition = makeWidgetDefinition(
+            id: "demo.widget",
+            supportsAudio: true,
+            packageDirectoryURL: rootURL
+        )
+        var createdPlayers: [TestAudioPlayer] = []
+        var publishedStates: [(UUID, WidgetHostAudioState)] = []
+        let service = WidgetHostAudioService(
+            makePlayer: { url in
+                let player = TestAudioPlayer(assetName: url.lastPathComponent)
+                createdPlayers.append(player)
+                return player
+            },
+            onStateChange: { instanceID, state in
+                publishedStates.append((instanceID, state))
+            },
+            log: { _ in }
+        )
+        let firstInstanceID = UUID()
+        let secondInstanceID = UUID()
+
+        try service.play(
+            widgetID: definition.id,
+            instanceID: firstInstanceID,
+            widgetDefinition: definition,
+            params: RuntimeAudioPlayParams(
+                playerId: "rain",
+                src: "assets/rain.wav",
+                loop: true,
+                volume: 0.25
+            )
+        )
+        try service.play(
+            widgetID: definition.id,
+            instanceID: firstInstanceID,
+            widgetDefinition: definition,
+            params: RuntimeAudioPlayParams(
+                playerId: "waves",
+                src: "assets/waves.wav",
+                loop: true,
+                volume: 0.6
+            )
+        )
+        try service.play(
+            widgetID: definition.id,
+            instanceID: secondInstanceID,
+            widgetDefinition: definition,
+            params: RuntimeAudioPlayParams(
+                playerId: "rain",
+                src: "assets/rain.wav",
+                loop: true,
+                volume: 0.4
+            )
+        )
+
+        var firstState = service.getState(instanceID: firstInstanceID)
+        XCTAssertEqual(firstState.playbackState, .playing)
+        XCTAssertEqual(firstState.players.count, 2)
+        XCTAssertEqual(service.getState(instanceID: secondInstanceID).players.count, 1)
+
+        try service.pauseAll(instanceID: firstInstanceID)
+        firstState = service.getState(instanceID: firstInstanceID)
+        XCTAssertEqual(firstState.playbackState, .paused)
+        XCTAssertEqual(service.getState(instanceID: secondInstanceID).playbackState, .playing)
+
+        try service.setVolume(
+            instanceID: firstInstanceID,
+            params: RuntimeAudioSetVolumeParams(
+                playerId: "rain",
+                value: 2
+            )
+        )
+        XCTAssertEqual(
+            service.getState(instanceID: firstInstanceID).players.first { $0.id == "rain" }?.volume,
+            1
+        )
+
+        try service.resumeAll(instanceID: firstInstanceID)
+        XCTAssertEqual(service.getState(instanceID: firstInstanceID).playbackState, .playing)
+
+        try service.stop(
+            instanceID: firstInstanceID,
+            params: RuntimeAudioPlayerIDParams(playerId: "waves")
+        )
+        XCTAssertEqual(service.getState(instanceID: firstInstanceID).players.count, 1)
+
+        service.stopAll(instanceID: firstInstanceID)
+        XCTAssertEqual(service.getState(instanceID: firstInstanceID), .empty)
+
+        XCTAssertEqual(createdPlayers.count, 3)
+        XCTAssertEqual(createdPlayers[0].assetName, "rain.wav")
+        XCTAssertEqual(createdPlayers[0].numberOfLoops, -1)
+        XCTAssertEqual(createdPlayers[0].playCallCount, 2)
+        XCTAssertEqual(createdPlayers[0].pauseCallCount, 1)
+        XCTAssertEqual(createdPlayers[1].assetName, "waves.wav")
+        XCTAssertEqual(createdPlayers[2].assetName, "rain.wav")
+        XCTAssertEqual(createdPlayers[2].playCallCount, 1)
+        XCTAssertGreaterThanOrEqual(publishedStates.count, 5)
+        XCTAssertEqual(publishedStates.last?.1, .empty)
+    }
+
+    func testAudioServiceRemovesFinishedOneShotPlayers() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: rootURL) }
+        let assetsURL = rootURL.appendingPathComponent(".skylane/build/assets", isDirectory: true)
+        try FileManager.default.createDirectory(at: assetsURL, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: assetsURL.appendingPathComponent("bell.wav").path, contents: Data())
+
+        let definition = makeWidgetDefinition(
+            id: "demo.widget",
+            supportsAudio: true,
+            packageDirectoryURL: rootURL
+        )
+        var createdPlayers: [TestAudioPlayer] = []
+        var publishedStates: [WidgetHostAudioState] = []
+        let service = WidgetHostAudioService(
+            makePlayer: { url in
+                let player = TestAudioPlayer(assetName: url.lastPathComponent)
+                createdPlayers.append(player)
+                return player
+            },
+            onStateChange: { _, state in
+                publishedStates.append(state)
+            },
+            log: { _ in }
+        )
+        let instanceID = UUID()
+
+        try service.play(
+            widgetID: definition.id,
+            instanceID: instanceID,
+            widgetDefinition: definition,
+            params: RuntimeAudioPlayParams(
+                playerId: "bell",
+                src: "assets/bell.wav",
+                loop: false,
+                volume: 0.5
+            )
+        )
+
+        XCTAssertEqual(service.getState(instanceID: instanceID).playbackState, .playing)
+        XCTAssertEqual(service.getState(instanceID: instanceID).players.count, 1)
+
+        createdPlayers[0].finishPlayback()
+        await Task.yield()
+
+        XCTAssertEqual(service.getState(instanceID: instanceID), .empty)
+        XCTAssertEqual(publishedStates.last, .empty)
     }
 
     func testMediaServiceReplacesStateFromFullStreamSnapshots() {
@@ -1621,7 +2041,9 @@ private struct DecodedRPCResponse<Value: Decodable>: Decodable {
 
 private func makeWidgetDefinition(
     id: String,
-    supportsNotifications: Bool
+    supportsNotifications: Bool = false,
+    supportsAudio: Bool = false,
+    packageDirectoryURL: URL? = nil
 ) -> WidgetDefinition {
     WidgetDefinition(
         id: id,
@@ -1629,18 +2051,23 @@ private func makeWidgetDefinition(
         icon: "bell",
         description: "Demo widget",
         theme: .blue,
-        capabilities: supportsNotifications
-            ? WidgetCapabilitiesDefinition(notifications: WidgetNotificationCapabilityDefinition())
+        capabilities: (supportsNotifications || supportsAudio)
+            ? WidgetCapabilitiesDefinition(
+                audio: supportsAudio ? WidgetAudioCapabilityDefinition() : nil,
+                notifications: supportsNotifications ? WidgetNotificationCapabilityDefinition() : nil
+            )
             : nil,
         minSpan: 3,
         maxSpan: 6,
         package: WidgetPackage(
             id: id,
             version: "0.1.0",
-            directoryPath: "/tmp/\(id)",
-            manifestPath: "/tmp/\(id)/package.json"
+            directoryPath: (packageDirectoryURL ?? URL(fileURLWithPath: "/tmp/\(id)", isDirectory: true)).path,
+            manifestPath: (packageDirectoryURL ?? URL(fileURLWithPath: "/tmp/\(id)", isDirectory: true))
+                .appendingPathComponent("package.json").path
         ),
-        entryFilePath: "/tmp/\(id)/src/index.tsx",
+        entryFilePath: (packageDirectoryURL ?? URL(fileURLWithPath: "/tmp/\(id)", isDirectory: true))
+            .appendingPathComponent("src/index.tsx").path,
         preferences: []
     )
 }
@@ -1734,6 +2161,127 @@ private final class TestMediaHandler: WidgetHostMediaHandling {
 
     func openSourceApp() async throws {
         invokedMethods.append("openSourceApp")
+    }
+}
+
+@MainActor
+private final class TestAudioHandler: WidgetHostAudioHandling {
+    struct PlayCall {
+        var widgetID: String
+        var instanceID: UUID
+        var widgetDefinition: WidgetDefinition?
+        var params: RuntimeAudioPlayParams
+    }
+
+    var stateByInstance: [UUID: WidgetHostAudioState] = [:]
+    var invokedMethods: [String] = []
+    var playCalls: [PlayCall] = []
+    var playerActionCalls: [(method: String, instanceID: UUID, playerId: String)] = []
+    var setVolumeCalls: [(instanceID: UUID, playerId: String, value: Double)] = []
+    var globalActionCalls: [(method: String, instanceID: UUID)] = []
+    var removedInstanceIDs: [UUID] = []
+
+    func getState(instanceID: UUID) -> WidgetHostAudioState {
+        invokedMethods.append("getState")
+        return stateByInstance[instanceID] ?? .empty
+    }
+
+    func play(
+        widgetID: String,
+        instanceID: UUID,
+        widgetDefinition: WidgetDefinition?,
+        params: RuntimeAudioPlayParams
+    ) throws {
+        invokedMethods.append("play")
+        playCalls.append(
+            PlayCall(
+                widgetID: widgetID,
+                instanceID: instanceID,
+                widgetDefinition: widgetDefinition,
+                params: params
+            )
+        )
+    }
+
+    func pause(instanceID: UUID, params: RuntimeAudioPlayerIDParams) throws {
+        invokedMethods.append("pause")
+        playerActionCalls.append(("pause", instanceID, params.playerId))
+    }
+
+    func togglePlayPause(instanceID: UUID, params: RuntimeAudioPlayerIDParams) throws {
+        invokedMethods.append("togglePlayPause")
+        playerActionCalls.append(("togglePlayPause", instanceID, params.playerId))
+    }
+
+    func stop(instanceID: UUID, params: RuntimeAudioPlayerIDParams) throws {
+        invokedMethods.append("stop")
+        playerActionCalls.append(("stop", instanceID, params.playerId))
+    }
+
+    func setVolume(instanceID: UUID, params: RuntimeAudioSetVolumeParams) throws {
+        invokedMethods.append("setVolume")
+        setVolumeCalls.append((instanceID, params.playerId, params.value))
+    }
+
+    func pauseAll(instanceID: UUID) throws {
+        invokedMethods.append("pauseAll")
+        globalActionCalls.append(("pauseAll", instanceID))
+    }
+
+    func resumeAll(instanceID: UUID) throws {
+        invokedMethods.append("resumeAll")
+        globalActionCalls.append(("resumeAll", instanceID))
+    }
+
+    func stopAll(instanceID: UUID) {
+        invokedMethods.append("stopAll")
+        globalActionCalls.append(("stopAll", instanceID))
+    }
+
+    func removeAllPlayers(instanceID: UUID) {
+        removedInstanceIDs.append(instanceID)
+    }
+}
+
+private final class TestAudioPlayer: WidgetHostAudioPlayerType {
+    let assetName: String?
+    var volume: Float = 1
+    var numberOfLoops: Int = 0
+    var isPlaying = false
+    var onPlaybackFinished: (() -> Void)?
+    var prepareToPlayCallCount = 0
+    var playCallCount = 0
+    var pauseCallCount = 0
+    var stopCallCount = 0
+
+    init(assetName: String? = nil) {
+        self.assetName = assetName
+    }
+
+    func prepareToPlay() -> Bool {
+        prepareToPlayCallCount += 1
+        return true
+    }
+
+    func play() -> Bool {
+        playCallCount += 1
+        isPlaying = true
+        return true
+    }
+
+    func pause() {
+        pauseCallCount += 1
+        isPlaying = false
+    }
+
+    func stop() {
+        stopCallCount += 1
+        isPlaying = false
+    }
+
+    func finishPlayback() {
+        isPlaying = false
+        onPlaybackFinished?()
     }
 }
 

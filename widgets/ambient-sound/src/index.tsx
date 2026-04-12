@@ -1,3 +1,4 @@
+import * as React from "react";
 import {
   Icon,
   IconButton,
@@ -6,6 +7,7 @@ import {
   Spacer,
   Stack,
   Text,
+  useAudio,
   useLocalStorage,
   useTheme,
 } from "@skylane/api";
@@ -14,9 +16,9 @@ const DEFAULT_SOUNDS = [
   { title: "Rain", icon: "cloud.rain.fill", volume: 4, asset: "rain.wav" },
   { title: "Fire", icon: "flame.fill", volume: 1, asset: "fire.wav" },
   { title: "Waves", icon: "water.waves", volume: 1, asset: "waves.wav" },
-  { title: "Forest", icon: "leaf.fill", volume: 1, asset: "forest.wav" },
-  { title: "Wind", icon: "wind", volume: 3, asset: "wind.wav" },
-  { title: "Lo-fi", icon: "music.note.list", volume: 2, asset: "lofi.wav" },
+  { title: "Forest", icon: "leaf.fill", volume: 0, asset: "forest.wav" },
+  { title: "Wind", icon: "wind", volume: 2, asset: "wind.wav" },
+  { title: "Lo-fi", icon: "music.note.list", volume: 0, asset: "lofi.wav" },
 ];
 
 function normalizeSounds(value) {
@@ -82,6 +84,29 @@ function tileFillForVolume(accent, volume, isPlaying) {
   }
 }
 
+function playerIdForSound(sound) {
+  return sound.asset;
+}
+
+function assetSourceForSound(sound) {
+  return `assets/${sound.asset}`;
+}
+
+function playbackVolumeForLevel(level) {
+  switch (level) {
+    case 4:
+      return 1;
+    case 3:
+      return 0.72;
+    case 2:
+      return 0.5;
+    case 1:
+      return 0.28;
+    default:
+      return 0;
+  }
+}
+
 function VolumeBar({ active, selected, index, accent, isPlaying, mutedColor }) {
   return (
     <Stack spacing={0} frame={{ width: 8, height: 10.5 }}>
@@ -89,10 +114,14 @@ function VolumeBar({ active, selected, index, accent, isPlaying, mutedColor }) {
       <RoundedRect
         fill={
           isPlaying
-            ? (active
-                ? (selected ? accent : "#FFFFFF52")
-                : "#FFFFFF14")
-            : (active ? mutedColor : "#FFFFFF10")
+            ? active
+              ? selected
+                ? accent
+                : "#FFFFFF52"
+              : "#FFFFFF14"
+            : active
+              ? mutedColor
+              : "#FFFFFF10"
         }
         cornerRadius={999}
         width={8}
@@ -106,10 +135,14 @@ function SoundTile({ sound, accent, textColor, mutedColor, isPlaying }) {
   const selected = sound.volume >= 1;
   const resolvedTextColor = !isPlaying
     ? mutedColor
-    : (selected ? textColor : mutedColor);
+    : selected
+      ? textColor
+      : mutedColor;
   const resolvedIconColor = !isPlaying
     ? mutedColor
-    : (selected ? accent : mutedColor);
+    : selected
+      ? accent
+      : mutedColor;
 
   return (
     <RoundedRect
@@ -162,17 +195,109 @@ function SoundTile({ sound, accent, textColor, mutedColor, isPlaying }) {
 
 export default function Widget() {
   const theme = useTheme();
+  const audio = useAudio();
   const [storedSounds, setStoredSounds] = useLocalStorage(
     "sounds",
     DEFAULT_SOUNDS,
   );
-  const [isPlaying, setIsPlaying] = useLocalStorage("is-playing", true);
+  const [isPlaying, setIsPlaying] = React.useState(false);
+  const [syncError, setSyncError] = React.useState(null);
   const sounds = normalizeSounds(storedSounds);
   const accent = "#75D1B8";
   const textColor = withAlpha(theme.colors.foreground, "E0");
   const mutedColor = withAlpha(theme.colors.foreground, "8F");
   const activeCount = sounds.filter((sound) => sound.volume > 0).length;
-  const statusText = isPlaying ? `${activeCount} active` : "All sounds paused";
+  const playersRef = React.useRef(audio.players);
+  const soundStateKey = sounds
+    .map((sound) => `${sound.asset}:${sound.volume}`)
+    .join("|");
+  const statusText =
+    syncError ?? (isPlaying ? `${activeCount} active` : "All sounds paused");
+
+  React.useEffect(() => {
+    playersRef.current = audio.players;
+  }, [audio.players]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    async function syncAudio() {
+      const existingPlayers = new Map(
+        playersRef.current.map((player) => [player.id, player]),
+      );
+
+      if (isPlaying) {
+        for (const sound of sounds) {
+          if (cancelled) {
+            return;
+          }
+
+          const playerId = playerIdForSound(sound);
+          if (sound.volume > 0) {
+            await audio.play({
+              playerId,
+              src: assetSourceForSound(sound),
+              loop: true,
+              volume: playbackVolumeForLevel(sound.volume),
+            });
+          } else {
+            await audio.stop(playerId);
+          }
+        }
+
+        if (!cancelled) {
+          await audio.resumeAll();
+          setSyncError(null);
+        }
+        return;
+      }
+
+      for (const sound of sounds) {
+        if (cancelled) {
+          return;
+        }
+
+        const playerId = playerIdForSound(sound);
+        if (sound.volume === 0) {
+          await audio.stop(playerId);
+          continue;
+        }
+
+        if (existingPlayers.has(playerId)) {
+          await audio.setVolume(playerId, playbackVolumeForLevel(sound.volume));
+        }
+      }
+
+      if (!cancelled) {
+        await audio.pauseAll();
+      }
+    }
+
+    void syncAudio().catch((error) => {
+      if (cancelled) {
+        return;
+      }
+
+      setSyncError(
+        error instanceof Error && error.message.trim() !== ""
+          ? error.message
+          : "Unable to play sounds",
+      );
+      setIsPlaying(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    audio.pauseAll,
+    audio.play,
+    audio.resumeAll,
+    audio.setVolume,
+    audio.stop,
+    isPlaying,
+    soundStateKey,
+  ]);
 
   function cycleVolume(title) {
     setStoredSounds((current) =>
@@ -192,7 +317,9 @@ export default function Widget() {
           weight="semibold"
           lineClamp={1}
           minimumScaleFactor={0.85}
-          color={isPlaying ? withAlpha(theme.colors.foreground, "D1") : textColor}
+          color={
+            isPlaying ? withAlpha(theme.colors.foreground, "D1") : textColor
+          }
         >
           {statusText}
         </Text>
@@ -205,7 +332,12 @@ export default function Widget() {
           width={18}
           height={18}
           iconSize={11}
-          onClick={() => setIsPlaying((current) => current !== true)}
+          onClick={() => {
+            if (!isPlaying) {
+              setSyncError(null);
+            }
+            setIsPlaying((current) => current !== true);
+          }}
         />
       </Inline>
 

@@ -345,6 +345,78 @@ Users control notifications in two places:
 - General settings contains the global widget notifications switch
 - Widget settings contains the per-instance notification switch for widgets that declare support
 
+### Audio
+
+Use widget audio when the host should play bundled local sound assets on the widget's behalf. Typical examples:
+
+- ambient loop mixers
+- focus timers with short bundled chimes
+- utility widgets with subtle local sound beds
+
+Audio playback is host-managed, not widget-managed. The widget requests per-player playback actions, while Skylane owns:
+
+- loading bundled asset files from the widget build output
+- concurrent playback for multiple named players in one widget instance
+- loop behavior
+- pause, resume, stop, and per-player volume changes
+
+To opt in, declare audio support in the manifest:
+
+```json
+{
+  "skylane": {
+    "id": "com.acme.ambient",
+    "title": "Ambient",
+    "icon": "speaker.wave.2.fill",
+    "minSpan": 4,
+    "maxSpan": 4,
+    "entry": "src/index.tsx",
+    "capabilities": {
+      "audio": {}
+    }
+  }
+}
+```
+
+`capabilities.audio` is optional. If it is missing, the widget cannot call the host audio RPCs.
+
+In widget code, use `useAudio()`:
+
+```tsx
+import { Button, Text, useAudio } from "@skylane/api";
+
+export default function Widget() {
+  const audio = useAudio();
+
+  return (
+    <>
+      <Text variant="body">{audio.playbackState}</Text>
+      <Button
+        title="Rain"
+        onClick={() =>
+          audio.play({
+            playerId: "rain",
+            src: "assets/rain.wav",
+            loop: true,
+            volume: 0.6,
+          })
+        }
+      />
+      <Button title="Pause All" variant="secondary" onClick={() => audio.pauseAll()} />
+    </>
+  );
+}
+```
+
+Important behavior:
+
+- audio player ids are scoped to the widget instance
+- `play()` creates or reuses one named player per `playerId`
+- sources must be widget-relative bundled asset paths such as `assets/rain.wav`
+- only bundled local assets are supported in v1, not remote URLs
+- `pauseAll()` and `resumeAll()` preserve the current player set and per-player volumes
+- `stop()` removes one player and `stopAll()` clears the widget instance's entire audio session
+
 ## Manifest
 
 Each widget declares a `skylane` block in `package.json`.
@@ -383,9 +455,10 @@ Optional fields:
 
 `capabilities` is where a widget declares access to host-managed APIs. Current capability keys:
 
+- `audio`
 - `notifications`
 
-Example manifest with both preferences and notifications:
+Example manifest with preferences plus audio and notifications:
 
 ```json
 {
@@ -412,6 +485,7 @@ Example manifest with both preferences and notifications:
     "maxSpan": 6,
     "entry": "src/index.tsx",
     "capabilities": {
+      "audio": {},
       "notifications": {}
     },
     "preferences": [
@@ -531,6 +605,7 @@ Remote image URLs are fetched by the host image pipeline, not by widget code:
 Other host-backed APIs available through `@skylane/api`:
 
 - `useCameras()` for camera selection
+- `useAudio()` for bundled local audio playback
 - `useMedia()` for now-playing data and transport controls
 - `useFetch()` and `usePromise()` for advanced async flows
 - `openURL()` for opening external links
@@ -559,6 +634,12 @@ If notifications do not fire:
 - make sure the widget declares `skylane.capabilities.notifications`
 - make sure widget notifications are enabled globally in General settings
 - make sure notifications are enabled for that widget instance in Widget settings
+
+If bundled audio does not play:
+
+- make sure the widget declares `skylane.capabilities.audio`
+- make sure the files live under `assets/`
+- make sure the widget uses widget-relative asset paths such as `assets/rain.wav`
 - make sure Skylane has notification permission in macOS System Settings
 - make sure the widget uses a stable id and a future `deliverAtMs`
 

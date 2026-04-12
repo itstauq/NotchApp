@@ -95,6 +95,10 @@ struct WidgetDefinition: Identifiable, Codable, Equatable {
         capabilities?.notifications != nil
     }
 
+    var supportsAudio: Bool {
+        capabilities?.audio != nil
+    }
+
     private var fallbackTheme: WidgetTheme {
         let themes = WidgetTheme.allCases
         return themes[stableThemeSeed % themes.count]
@@ -257,8 +261,11 @@ enum WidgetTheme: String, Codable, Equatable, CaseIterable {
 }
 
 struct WidgetCapabilitiesDefinition: Codable, Equatable {
-    var notifications: WidgetNotificationCapabilityDefinition?
+    var audio: WidgetAudioCapabilityDefinition? = nil
+    var notifications: WidgetNotificationCapabilityDefinition? = nil
 }
+
+struct WidgetAudioCapabilityDefinition: Codable, Equatable {}
 
 struct WidgetNotificationCapabilityDefinition: Codable, Equatable {
 }
@@ -521,6 +528,7 @@ struct WidgetManifest: Codable {
         var icon: String
         var theme: WidgetTheme?
         var capabilities: WidgetCapabilitiesDefinition?
+        var audio: WidgetAudioCapabilityDefinition?
         var notifications: WidgetNotificationCapabilityDefinition?
         var minSpan: Int
         var maxSpan: Int
@@ -533,11 +541,14 @@ struct WidgetManifest: Codable {
                 return capabilities
             }
 
-            guard let notifications else {
+            guard audio != nil || notifications != nil else {
                 return nil
             }
 
-            return WidgetCapabilitiesDefinition(notifications: notifications)
+            return WidgetCapabilitiesDefinition(
+                audio: audio,
+                notifications: notifications
+            )
         }
     }
 

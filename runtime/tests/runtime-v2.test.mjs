@@ -356,6 +356,144 @@ test("runtime-v2 forwards host events to mounted workers so useMedia can update 
   assert.equal(pushedRender.params.data.props.text, "Blinding Lights");
 });
 
+test("runtime-v2 forwards host events to mounted workers so useAudio can update without polling", async (t) => {
+  const dir = createTempDir(t, "skylane-runtime-v2-audio-host-event-");
+  const bundlePath = path.join(dir, "bundle.cjs");
+
+  fs.writeFileSync(
+    bundlePath,
+    [
+      'const React = require("react");',
+      'const { useAudio } = require("@skylane/api");',
+      "module.exports.default = function Widget() {",
+      "  const audio = useAudio();",
+      '  return React.createElement("Text", null, audio.isLoading ? "loading" : String(audio.playbackState));',
+      "};",
+      "",
+    ].join("\n")
+  );
+
+  const runtime = createRuntimeHarness(t);
+  const instanceId = "instance-audio-host-event-1";
+
+  runtime.send({
+    jsonrpc: "2.0",
+    id: "mount-audio-host-event-1",
+    method: "mount",
+    params: {
+      widgetId: "test.widget",
+      instanceId,
+      bundlePath,
+      props: {
+        environment: {
+          widgetId: "test.widget",
+          instanceId,
+          viewId: "view-1",
+          span: 1,
+          hostColumnCount: 4,
+          isEditing: false,
+          isDevelopment: false,
+        },
+      },
+    },
+  });
+
+  const mountResponse = await runtime.waitFor(
+    (message) => message.id === "mount-audio-host-event-1",
+    "the mount response"
+  );
+  const sessionId = mountResponse.result?.sessionId;
+  assert.equal(typeof sessionId, "string");
+
+  await runtime.waitFor(
+    (message) => message.method === "render"
+      && message.params?.sessionId === sessionId
+      && message.params?.kind === "full"
+      && message.params?.data?.props?.text === "loading",
+    "the initial loading render"
+  );
+
+  const audioGetStateRequest = await runtime.waitFor(
+    (message) => message.method === "rpc" && message.params?.method === "audio.getState",
+    "the audio.getState rpc"
+  );
+  runtime.send({
+    jsonrpc: "2.0",
+    id: audioGetStateRequest.id,
+    result: {
+      value: {
+        playbackState: "paused",
+        players: [
+          {
+            id: "rain",
+            src: "assets/rain.wav",
+            playbackState: "paused",
+            volume: 0.5,
+            loop: true,
+          },
+        ],
+      },
+    },
+  });
+
+  runtime.send({
+    jsonrpc: "2.0",
+    method: "requestFullTree",
+    params: {
+      instanceId,
+      sessionId,
+    },
+  });
+
+  await runtime.waitFor(
+    (message) => message.method === "render"
+      && message.params?.sessionId === sessionId
+      && message.params?.kind === "full"
+      && message.params?.data?.props?.text === "paused",
+    "the audio render after getState"
+  );
+
+  runtime.send({
+    jsonrpc: "2.0",
+    method: "hostEvent",
+    params: {
+      instanceId,
+      sessionId,
+      name: "audio.state",
+      payload: {
+        playbackState: "playing",
+        players: [
+          {
+            id: "rain",
+            src: "assets/rain.wav",
+            playbackState: "playing",
+            volume: 0.75,
+            loop: true,
+          },
+        ],
+      },
+    },
+  });
+
+  runtime.send({
+    jsonrpc: "2.0",
+    method: "requestFullTree",
+    params: {
+      instanceId,
+      sessionId,
+    },
+  });
+
+  const pushedRender = await runtime.waitFor(
+    (message) => message.method === "render"
+      && message.params?.sessionId === sessionId
+      && message.params?.kind === "full"
+      && message.params?.data?.props?.text === "playing",
+    "the pushed audio render"
+  );
+  assert.equal(pushedRender.params.data.props.text, "playing");
+});
+
 test("runtime-v2 exposes resolved preferences through usePreference and resyncs on prop updates", async (t) => {
   const dir = createTempDir(t, "skylane-runtime-v2-preferences-");
   const bundlePath = path.join(dir, "bundle.cjs");
