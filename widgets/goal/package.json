@@ -16,7 +16,7 @@
   "skylane": {
     "id": "com.skylaneapp.goal",
     "title": "Goal",
-    "description": "One finish line",
+    "description": "Time blocking",
     "icon": "target",
     "theme": "green",
     "minSpan": 3,

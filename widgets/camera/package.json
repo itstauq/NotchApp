@@ -16,7 +16,7 @@
   "skylane": {
     "id": "com.skylaneapp.camera-preview",
     "title": "Camera Preview",
-    "description": "Mirror preview",
+    "description": "Your hand mirror",
     "icon": "camera.fill",
     "theme": "blue",
     "minSpan": 3,

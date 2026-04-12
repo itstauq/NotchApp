@@ -16,7 +16,7 @@
   "skylane": {
     "id": "com.skylaneapp.pomodoro",
     "title": "Pomodoro",
-    "description": "Focus timer with breaks",
+    "description": "Focus timer",
     "icon": "timer",
     "theme": "amber",
     "minSpan": 3,
