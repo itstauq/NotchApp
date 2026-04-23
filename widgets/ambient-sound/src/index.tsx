@@ -207,6 +207,8 @@ export default function Widget() {
   const textColor = withAlpha(theme.colors.foreground, "E0");
   const mutedColor = withAlpha(theme.colors.foreground, "8F");
   const activeCount = sounds.filter((sound) => sound.volume > 0).length;
+  const isMasterPaused =
+    activeCount > 0 && !isPlaying && audio.playbackState === "paused";
   const playersRef = React.useRef(audio.players);
   const soundStateKey = sounds
     .map((sound) => `${sound.asset}:${sound.volume}`)
@@ -341,7 +343,55 @@ export default function Widget() {
         />
       </Inline>
 
-      <Stack spacing={6} frame={{ maxWidth: Infinity, maxHeight: Infinity }}>
+      <Stack
+        spacing={6}
+        frame={{ maxWidth: Infinity, maxHeight: Infinity }}
+        overlay={
+          isMasterPaused ? (
+            <RoundedRect
+              onPress={() => {
+                setSyncError(null);
+                setIsPlaying(true);
+              }}
+              fill="#06110ED8"
+              strokeColor="#FFFFFF14"
+              strokeWidth={1}
+              cornerRadius={16}
+              frame={{ maxWidth: Infinity, maxHeight: Infinity }}
+            >
+              <Stack
+                spacing={5}
+                alignment="center"
+                frame={{ maxWidth: Infinity, maxHeight: Infinity }}
+              >
+                <Icon
+                  symbol="play.circle.fill"
+                  size={18}
+                  weight="semibold"
+                  color={accent}
+                />
+                <Text
+                  size={11}
+                  weight="semibold"
+                  alignment="center"
+                  color={textColor}
+                  frame={{ maxWidth: Infinity }}
+                >
+                  Paused
+                </Text>
+                <Text
+                  size={9}
+                  alignment="center"
+                  color={mutedColor}
+                  frame={{ maxWidth: Infinity }}
+                >
+                  Tap to resume your mix
+                </Text>
+              </Stack>
+            </RoundedRect>
+          ) : null
+        }
+      >
         <Inline spacing={6} frame={{ maxWidth: Infinity }}>
           {sounds.slice(0, 3).map((sound) => (
             <SoundTile
