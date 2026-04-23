@@ -1,6 +1,7 @@
 import AVFoundation
 import AppKit
 import Combine
+import EventKit
 import Foundation
 import UserNotifications
 
@@ -60,6 +61,22 @@ struct RuntimeAudioSetVolumeParams: Decodable {
 
 struct RuntimeCameraSelectDeviceParams: Decodable {
     var id: String
+}
+
+struct RuntimeEventsSnapshotParams: Decodable {
+    var startMs: Double
+    var endMs: Double
+    var calendarIDs: [String]?
+    var includeAllDay: Bool?
+    var limit: Double?
+}
+
+struct RuntimeEventsRequestAccessParams: Decodable {
+    var level: WidgetEventsAccessLevel?
+}
+
+struct RuntimeEventOpenParams: Decodable {
+    var eventID: String
 }
 
 struct RuntimeSetPreferenceValueParams: Decodable {
@@ -2086,6 +2103,784 @@ enum WidgetNotificationAuthorizationStatus: String {
     }
 }
 
+enum WidgetHostEventsAuthorizationStatus: String, Codable, Equatable {
+    case notDetermined
+    case denied
+    case restricted
+    case writeOnly
+    case fullAccess
+}
+
+enum WidgetHostEventsAccessLevel: String, Codable, Equatable {
+    case none
+    case writeOnly
+    case fullAccess
+}
+
+enum WidgetHostEventSourceKind: String, Codable, Equatable {
+    case local
+    case caldav
+    case exchange
+    case subscription
+    case birthday
+    case unknown
+}
+
+struct WidgetHostEventsAccessState: Codable, Equatable {
+    var authorizationStatus: WidgetHostEventsAuthorizationStatus
+    var accessLevel: WidgetHostEventsAccessLevel
+}
+
+struct WidgetHostEventSource: Codable, Equatable {
+    var id: String
+    var title: String?
+    var kind: WidgetHostEventSourceKind
+}
+
+struct WidgetHostEventCalendar: Codable, Equatable {
+    var id: String
+    var title: String
+    var color: String?
+    var source: WidgetHostEventSource?
+    var allowsContentModifications: Bool?
+    var isDefaultForNewEvents: Bool?
+}
+
+struct WidgetHostEventItem: Codable, Equatable {
+    var id: String
+    var calendarID: String
+    var title: String?
+    var location: String?
+    var notes: String?
+    var url: String?
+    var startMs: Double
+    var endMs: Double
+    var isAllDay: Bool
+    var isCurrent: Bool
+    var isPast: Bool
+    var isUpcoming: Bool
+}
+
+struct WidgetHostEventsSnapshot: Codable, Equatable {
+    var authorizationStatus: WidgetHostEventsAuthorizationStatus
+    var accessLevel: WidgetHostEventsAccessLevel
+    var items: [WidgetHostEventItem]
+}
+
+struct WidgetHostEventCalendarsSnapshot: Codable, Equatable {
+    var authorizationStatus: WidgetHostEventsAuthorizationStatus
+    var accessLevel: WidgetHostEventsAccessLevel
+    var items: [WidgetHostEventCalendar]
+}
+
+@MainActor
+protocol WidgetHostEventsHandling: AnyObject {
+    func getSnapshot(
+        params: RuntimeEventsSnapshotParams,
+        capabilityAccessLevel: WidgetEventsAccessLevel
+    ) throws -> WidgetHostEventsSnapshot
+    func listCalendars(capabilityAccessLevel: WidgetEventsAccessLevel) -> WidgetHostEventCalendarsSnapshot
+    func requestAccess(
+        level: WidgetEventsAccessLevel,
+        capabilityAccessLevel: WidgetEventsAccessLevel
+    ) async throws -> WidgetHostEventsAccessState
+    func openEvent(_ params: RuntimeEventOpenParams) async throws
+    func openSourceApp() async throws
+}
+
+@MainActor
+final class WidgetHostEventsService: WidgetHostEventsHandling {
+    typealias StateChangeHandler = @MainActor () -> Void
+
+    private let eventStore: EKEventStore
+    private let workspace: NSWorkspace
+    private let onStateChange: StateChangeHandler?
+    private let log: (String) -> Void
+    private var storeChangedObserver: NSObjectProtocol?
+
+    init(
+        eventStore: EKEventStore = EKEventStore(),
+        workspace: NSWorkspace = .shared,
+        onStateChange: StateChangeHandler? = nil,
+        log: @escaping (String) -> Void = { _ in }
+    ) {
+        self.eventStore = eventStore
+        self.workspace = workspace
+        self.onStateChange = onStateChange
+        self.log = log
+        storeChangedObserver = NotificationCenter.default.addObserver(
+            forName: .EKEventStoreChanged,
+            object: eventStore,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.onStateChange?()
+            }
+        }
+    }
+
+    deinit {
+        if let storeChangedObserver {
+            NotificationCenter.default.removeObserver(storeChangedObserver)
+        }
+    }
+
+    func getSnapshot(
+        params: RuntimeEventsSnapshotParams,
+        capabilityAccessLevel: WidgetEventsAccessLevel
+    ) throws -> WidgetHostEventsSnapshot {
+        let accessState = effectiveAccessState(for: capabilityAccessLevel)
+        guard accessState.accessLevel == .fullAccess else {
+            return WidgetHostEventsSnapshot(
+                authorizationStatus: accessState.authorizationStatus,
+                accessLevel: accessState.accessLevel,
+                items: []
+            )
+        }
+
+        let validatedQuery = try validatedSnapshotQuery(params)
+        let calendars = resolvedCalendars(for: validatedQuery.calendarIDs)
+        let predicate = eventStore.predicateForEvents(
+            withStart: validatedQuery.startDate,
+            end: validatedQuery.endDate,
+            calendars: calendars
+        )
+
+        let now = Date()
+        var items = eventStore.events(matching: predicate)
+            .sorted { left, right in
+                let leftStart = left.startDate ?? .distantPast
+                let rightStart = right.startDate ?? .distantPast
+                if leftStart != rightStart {
+                    return leftStart < rightStart
+                }
+
+                return (left.eventIdentifier ?? "") < (right.eventIdentifier ?? "")
+            }
+            .compactMap { event in
+                eventItem(from: event, now: now, includeAllDay: validatedQuery.includeAllDay)
+            }
+
+        if let limit = validatedQuery.limit {
+            items = Array(items.prefix(limit))
+        }
+
+        return WidgetHostEventsSnapshot(
+            authorizationStatus: accessState.authorizationStatus,
+            accessLevel: accessState.accessLevel,
+            items: items
+        )
+    }
+
+    func listCalendars(capabilityAccessLevel: WidgetEventsAccessLevel) -> WidgetHostEventCalendarsSnapshot {
+        let accessState = effectiveAccessState(for: capabilityAccessLevel)
+        guard accessState.accessLevel == .fullAccess else {
+            return WidgetHostEventCalendarsSnapshot(
+                authorizationStatus: accessState.authorizationStatus,
+                accessLevel: accessState.accessLevel,
+                items: []
+            )
+        }
+
+        let defaultCalendarID = eventStore.defaultCalendarForNewEvents?.calendarIdentifier
+        let calendars = eventStore.calendars(for: .event)
+            .sorted {
+                if $0.title != $1.title {
+                    return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+                }
+
+                return $0.calendarIdentifier < $1.calendarIdentifier
+            }
+            .map {
+                calendarItem(from: $0, defaultCalendarID: defaultCalendarID)
+            }
+
+        return WidgetHostEventCalendarsSnapshot(
+            authorizationStatus: accessState.authorizationStatus,
+            accessLevel: accessState.accessLevel,
+            items: calendars
+        )
+    }
+
+    func requestAccess(
+        level: WidgetEventsAccessLevel,
+        capabilityAccessLevel: WidgetEventsAccessLevel
+    ) async throws -> WidgetHostEventsAccessState {
+        guard requestedAccessIsAllowed(level, by: capabilityAccessLevel) else {
+            throw RuntimeTransportRPCError(
+                code: -32030,
+                message: "Widget does not declare \(level.rawValue) events access.",
+                data: nil
+            )
+        }
+
+        let status = EKEventStore.authorizationStatus(for: .event)
+        switch status {
+        case .denied, .restricted:
+            return effectiveAccessState(for: capabilityAccessLevel)
+        case .fullAccess, .writeOnly, .authorized:
+            return effectiveAccessState(for: capabilityAccessLevel)
+        case .notDetermined:
+            break
+        @unknown default:
+            break
+        }
+
+        let granted: Bool
+        if #available(macOS 14.0, *) {
+            switch level {
+            case .writeOnly:
+                granted = try await withCheckedThrowingContinuation { continuation in
+                    eventStore.requestWriteOnlyAccessToEvents { granted, error in
+                        if let error {
+                            continuation.resume(throwing: error)
+                            return
+                        }
+
+                        continuation.resume(returning: granted)
+                    }
+                }
+            case .fullAccess:
+                granted = try await withCheckedThrowingContinuation { continuation in
+                    eventStore.requestFullAccessToEvents { granted, error in
+                        if let error {
+                            continuation.resume(throwing: error)
+                            return
+                        }
+
+                        continuation.resume(returning: granted)
+                    }
+                }
+            }
+        } else {
+            granted = try await withCheckedThrowingContinuation { continuation in
+                eventStore.requestAccess(to: .event) { granted, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    continuation.resume(returning: granted)
+                }
+            }
+        }
+
+        if !granted {
+            log("Widget events: permission request for \(level.rawValue) was not granted.")
+        }
+        onStateChange?()
+        return effectiveAccessState(for: capabilityAccessLevel)
+    }
+
+    func openEvent(_ params: RuntimeEventOpenParams) async throws {
+        let event = try resolvedEvent(forOpaqueID: params.eventID)
+
+        do {
+            try await revealEventInCalendar(event)
+        } catch {
+            log("Widget events: failed to reveal event in Calendar (\(error.localizedDescription)); falling back to opening Calendar.")
+            try await openSourceApp()
+        }
+    }
+
+    func openSourceApp() async throws {
+        guard let appURL = workspace.urlForApplication(withBundleIdentifier: "com.apple.iCal") else {
+            throw RuntimeTransportRPCError(
+                code: -32032,
+                message: "Calendar is unavailable on this Mac.",
+                data: nil
+            )
+        }
+
+        _ = try await workspaceOpenApplication(at: appURL)
+    }
+
+    private func validatedSnapshotQuery(_ params: RuntimeEventsSnapshotParams) throws -> (
+        startDate: Date,
+        endDate: Date,
+        calendarIDs: [String],
+        includeAllDay: Bool,
+        limit: Int?
+    ) {
+        guard params.startMs.isFinite else {
+            throw RuntimeTransportRPCError(
+                code: -32602,
+                message: "Events startMs must be a finite timestamp.",
+                data: nil
+            )
+        }
+
+        guard params.endMs.isFinite else {
+            throw RuntimeTransportRPCError(
+                code: -32602,
+                message: "Events endMs must be a finite timestamp.",
+                data: nil
+            )
+        }
+
+        let startDate = Date(timeIntervalSince1970: params.startMs / 1000)
+        let endDate = Date(timeIntervalSince1970: params.endMs / 1000)
+        guard endDate > startDate else {
+            throw RuntimeTransportRPCError(
+                code: -32602,
+                message: "Events endMs must be greater than startMs.",
+                data: nil
+            )
+        }
+
+        let calendarIDs = (params.calendarIDs ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let includeAllDay = params.includeAllDay ?? true
+
+        let limit: Int?
+        if let rawLimit = params.limit {
+            guard rawLimit.isFinite, rawLimit > 0 else {
+                throw RuntimeTransportRPCError(
+                    code: -32602,
+                    message: "Events limit must be a positive finite number.",
+                    data: nil
+                )
+            }
+
+            limit = max(1, Int(rawLimit.rounded(.down)))
+        } else {
+            limit = nil
+        }
+
+        return (startDate, endDate, calendarIDs, includeAllDay, limit)
+    }
+
+    private func effectiveAccessState(for capabilityAccessLevel: WidgetEventsAccessLevel) -> WidgetHostEventsAccessState {
+        let hostAuthorizationStatus = EKEventStore.authorizationStatus(for: .event)
+        let hostAccessLevel: WidgetHostEventsAccessLevel
+        let hostAuthorization: WidgetHostEventsAuthorizationStatus
+
+        switch hostAuthorizationStatus {
+        case .fullAccess:
+            hostAccessLevel = .fullAccess
+            hostAuthorization = .fullAccess
+        case .writeOnly:
+            hostAccessLevel = .writeOnly
+            hostAuthorization = .writeOnly
+        case .denied:
+            hostAccessLevel = .none
+            hostAuthorization = .denied
+        case .restricted:
+            hostAccessLevel = .none
+            hostAuthorization = .restricted
+        case .authorized:
+            hostAccessLevel = .fullAccess
+            hostAuthorization = .fullAccess
+        case .notDetermined:
+            hostAccessLevel = .none
+            hostAuthorization = .notDetermined
+        @unknown default:
+            hostAccessLevel = .none
+            hostAuthorization = .restricted
+        }
+
+        let effectiveAccessLevel = cappedAccessLevel(hostAccessLevel, by: capabilityAccessLevel)
+        let effectiveAuthorization: WidgetHostEventsAuthorizationStatus
+        switch hostAuthorization {
+        case .fullAccess, .writeOnly:
+            switch effectiveAccessLevel {
+            case .fullAccess:
+                effectiveAuthorization = .fullAccess
+            case .writeOnly:
+                effectiveAuthorization = .writeOnly
+            case .none:
+                effectiveAuthorization = .notDetermined
+            }
+        case .notDetermined, .denied, .restricted:
+            effectiveAuthorization = hostAuthorization
+        }
+
+        return WidgetHostEventsAccessState(
+            authorizationStatus: effectiveAuthorization,
+            accessLevel: effectiveAccessLevel
+        )
+    }
+
+    private func cappedAccessLevel(
+        _ hostAccessLevel: WidgetHostEventsAccessLevel,
+        by capabilityAccessLevel: WidgetEventsAccessLevel
+    ) -> WidgetHostEventsAccessLevel {
+        switch (hostAccessLevel, capabilityAccessLevel) {
+        case (.fullAccess, .fullAccess):
+            return .fullAccess
+        case (.fullAccess, .writeOnly):
+            return .writeOnly
+        case (.writeOnly, _):
+            return .writeOnly
+        case (.none, _):
+            return .none
+        }
+    }
+
+    private func requestedAccessIsAllowed(_ requested: WidgetEventsAccessLevel, by capabilityAccessLevel: WidgetEventsAccessLevel) -> Bool {
+        switch (requested, capabilityAccessLevel) {
+        case (.writeOnly, .writeOnly), (.writeOnly, .fullAccess), (.fullAccess, .fullAccess):
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func resolvedCalendars(for calendarIDs: [String]) -> [EKCalendar]? {
+        guard !calendarIDs.isEmpty else {
+            return nil
+        }
+
+        let calendars = calendarIDs.compactMap { eventStore.calendar(withIdentifier: $0) }
+        return calendars.isEmpty ? nil : calendars
+    }
+
+    private func calendarItem(from calendar: EKCalendar, defaultCalendarID: String?) -> WidgetHostEventCalendar {
+        WidgetHostEventCalendar(
+            id: calendar.calendarIdentifier,
+            title: calendar.title,
+            color: calendarColorHex(calendar),
+            source: eventSource(from: calendar.source),
+            allowsContentModifications: calendar.allowsContentModifications,
+            isDefaultForNewEvents: calendar.calendarIdentifier == defaultCalendarID
+        )
+    }
+
+    private func eventSource(from source: EKSource?) -> WidgetHostEventSource? {
+        guard let source else {
+            return nil
+        }
+
+        return WidgetHostEventSource(
+            id: source.sourceIdentifier,
+            title: normalizedTrimmedString(source.title),
+            kind: sourceKind(from: source)
+        )
+    }
+
+    private func sourceKind(from source: EKSource) -> WidgetHostEventSourceKind {
+        switch source.sourceType {
+        case .local:
+            return .local
+        case .calDAV, .mobileMe:
+            return .caldav
+        case .exchange:
+            return .exchange
+        case .subscribed:
+            return .subscription
+        case .birthdays:
+            return .birthday
+        @unknown default:
+            return .unknown
+        }
+    }
+
+    private func eventItem(from event: EKEvent, now: Date, includeAllDay: Bool) -> WidgetHostEventItem? {
+        guard includeAllDay || !event.isAllDay else {
+            return nil
+        }
+
+        guard let startDate = event.startDate,
+              let endDate = event.endDate else {
+            return nil
+        }
+
+        guard let opaqueID = opaqueEventIdentifier(for: event, startDate: startDate) else {
+            return nil
+        }
+
+        return WidgetHostEventItem(
+            id: opaqueID,
+            calendarID: event.calendar.calendarIdentifier,
+            title: normalizedTrimmedString(event.title),
+            location: normalizedTrimmedString(event.location),
+            notes: normalizedTrimmedString(event.notes),
+            url: primaryEventURLString(for: event),
+            startMs: startDate.timeIntervalSince1970 * 1000,
+            endMs: endDate.timeIntervalSince1970 * 1000,
+            isAllDay: event.isAllDay,
+            isCurrent: now >= startDate && now < endDate,
+            isPast: endDate <= now,
+            isUpcoming: startDate > now
+        )
+    }
+
+    private func normalizedTrimmedString(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func primaryEventURLString(for event: EKEvent) -> String? {
+        if let directURL = normalizedTrimmedString(event.url?.absoluteString),
+           directURL.lowercased().hasPrefix("https://") {
+            return directURL
+        }
+
+        if let location = normalizedTrimmedString(event.location),
+           location.lowercased().hasPrefix("https://") {
+            return location
+        }
+
+        let noteCandidates = extractHTTPSURLs(from: event.notes)
+        return noteCandidates.first
+    }
+
+    private func extractHTTPSURLs(from rawValue: String?) -> [String] {
+        guard let rawValue = normalizedTrimmedString(rawValue) else {
+            return []
+        }
+
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+            return []
+        }
+
+        let range = NSRange(rawValue.startIndex..<rawValue.endIndex, in: rawValue)
+        return detector.matches(in: rawValue, options: [], range: range).compactMap { match in
+            guard let url = match.url?.absoluteString,
+                  url.lowercased().hasPrefix("https://") else {
+                return nil
+            }
+
+            return url
+        }
+    }
+
+    private func calendarColorHex(_ calendar: EKCalendar) -> String? {
+        let nsColor = calendar.cgColor.flatMap { NSColor(cgColor: $0) } ?? calendar.color
+        guard let srgb = nsColor?.usingColorSpace(NSColorSpace.sRGB) else {
+            return nil
+        }
+
+        let red = Int(round(srgb.redComponent * 255))
+        let green = Int(round(srgb.greenComponent * 255))
+        let blue = Int(round(srgb.blueComponent * 255))
+        return String(format: "#%02X%02X%02X", red, green, blue)
+    }
+
+    private func opaqueEventIdentifier(for event: EKEvent, startDate: Date) -> String? {
+        let startMs = Int(startDate.timeIntervalSince1970 * 1000)
+        if let externalIdentifier = normalizedTrimmedString(event.calendarItemExternalIdentifier) {
+            return "ext:\(encodedOpaqueComponent(externalIdentifier))#\(startMs)"
+        }
+
+        if let eventIdentifier = normalizedTrimmedString(event.eventIdentifier) {
+            return "ek:\(encodedOpaqueComponent(eventIdentifier))#\(startMs)"
+        }
+
+        return nil
+    }
+
+    private func encodedOpaqueComponent(_ value: String) -> String {
+        Data(value.utf8).base64EncodedString()
+    }
+
+    private func decodedOpaqueComponent(_ value: String) -> String? {
+        guard let data = Data(base64Encoded: value) else {
+            return nil
+        }
+
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func resolvedEvent(forOpaqueID opaqueID: String) throws -> EKEvent {
+        let trimmedID = opaqueID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedID.isEmpty else {
+            throw RuntimeTransportRPCError(
+                code: -32602,
+                message: "Event eventID must be a non-empty string.",
+                data: nil
+            )
+        }
+
+        let components = trimmedID.split(separator: "#", maxSplits: 1).map(String.init)
+        guard let prefixAndPayload = components.first else {
+            throw RuntimeTransportRPCError(
+                code: -32602,
+                message: "Event eventID is invalid.",
+                data: nil
+            )
+        }
+
+        let startMs = components.count == 2 ? Double(components[1]) : nil
+        let prefixComponents = prefixAndPayload.split(separator: ":", maxSplits: 1).map(String.init)
+        guard prefixComponents.count == 2,
+              let identifier = decodedOpaqueComponent(prefixComponents[1]) else {
+            throw RuntimeTransportRPCError(
+                code: -32602,
+                message: "Event eventID is invalid.",
+                data: nil
+            )
+        }
+
+        switch prefixComponents[0] {
+        case "ek":
+            if let event = eventStore.event(withIdentifier: identifier) {
+                return event
+            }
+        case "ext":
+            let matchingEvents = eventStore.calendarItems(withExternalIdentifier: identifier)
+                .compactMap { $0 as? EKEvent }
+            if let startMs {
+                let matchingStartDate = Date(timeIntervalSince1970: startMs / 1000)
+                if let matchedEvent = matchingEvents.first(where: {
+                    guard let startDate = $0.startDate else { return false }
+                    return abs(startDate.timeIntervalSince1970 - matchingStartDate.timeIntervalSince1970) < 1
+                }) {
+                    return matchedEvent
+                }
+            }
+
+            if let firstEvent = matchingEvents.first {
+                return firstEvent
+            }
+        default:
+            break
+        }
+
+        throw RuntimeTransportRPCError(
+            code: -32032,
+            message: "The requested event could not be found.",
+            data: nil
+        )
+    }
+
+    private func openURL(_ url: URL) async throws -> Bool {
+        let success = workspace.open(url)
+        guard success else {
+            throw RuntimeTransportRPCError(
+                code: -32032,
+                message: "Calendar is unavailable on this Mac.",
+                data: nil
+            )
+        }
+
+        return success
+    }
+
+    private func workspaceOpenApplication(at url: URL) async throws -> NSRunningApplication? {
+        try await withCheckedThrowingContinuation { continuation in
+            workspace.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { app, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                continuation.resume(returning: app)
+            }
+        }
+    }
+
+    private func revealEventInCalendar(_ event: EKEvent) async throws {
+        guard let calendarTitle = normalizedTrimmedString(event.calendar.title),
+              let startDate = event.startDate else {
+            throw RuntimeTransportRPCError(
+                code: -32032,
+                message: "Unable to open the requested event.",
+                data: nil
+            )
+        }
+
+        let externalUID = normalizedTrimmedString(event.calendarItemExternalIdentifier)
+        let localIdentifier = normalizedTrimmedString(event.eventIdentifier)
+        let fallbackUID = externalUID ?? localIdentifier
+
+        guard let eventUID = fallbackUID else {
+            throw RuntimeTransportRPCError(
+                code: -32032,
+                message: "Unable to open the requested event.",
+                data: nil
+            )
+        }
+
+        let startSeconds = String(Int(startDate.timeIntervalSince1970.rounded()))
+        let fallbackTitle = normalizedTrimmedString(event.title) ?? ""
+
+        let script = """
+        on run argv
+            set calendarTitle to item 1 of argv
+            set eventUID to item 2 of argv
+            set startSeconds to item 3 of argv as integer
+            set eventTitle to item 4 of argv
+            tell application "Calendar"
+                activate
+                set targetCalendar to first calendar whose title is calendarTitle
+                set targetEvents to every event of targetCalendar whose uid is eventUID
+                if (count of targetEvents) > 0 then
+                    repeat with candidateEvent in targetEvents
+                        set candidateStartSeconds to ((start date of candidateEvent) - (date "Thursday, January 1, 1970 at 12:00:00 AM")) as integer
+                        if candidateStartSeconds is startSeconds then
+                            show candidateEvent
+                            return
+                        end if
+                    end repeat
+                    show item 1 of targetEvents
+                    return
+                end if
+                if eventTitle is not "" then
+                    set titledEvents to every event of targetCalendar whose summary is eventTitle
+                    repeat with candidateEvent in titledEvents
+                        set candidateStartSeconds to ((start date of candidateEvent) - (date "Thursday, January 1, 1970 at 12:00:00 AM")) as integer
+                        if candidateStartSeconds is startSeconds then
+                            show candidateEvent
+                            return
+                        end if
+                    end repeat
+                end if
+                error "Unable to locate the requested event in Calendar."
+            end tell
+        end run
+        """
+
+        try await runAppleScript(script, arguments: [calendarTitle, eventUID, startSeconds, fallbackTitle])
+    }
+
+    private func runAppleScript(_ script: String, arguments: [String]) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+
+            var commandArguments = ["-e", script]
+            if !arguments.isEmpty {
+                commandArguments.append("--")
+                commandArguments.append(contentsOf: arguments)
+            }
+            process.arguments = commandArguments
+
+            let errorPipe = Pipe()
+            process.standardError = errorPipe
+
+            process.terminationHandler = { process in
+                let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                let errorMessage = String(data: errorData, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+
+                guard process.terminationStatus == 0 else {
+                    continuation.resume(throwing: RuntimeTransportRPCError(
+                        code: -32032,
+                        message: errorMessage?.isEmpty == false ? errorMessage! : "Unable to open the requested event.",
+                        data: nil
+                    ))
+                    return
+                }
+
+                continuation.resume(returning: ())
+            }
+
+            do {
+                try process.run()
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
+    }
+
+}
+
 @MainActor
 protocol WidgetHostNotificationHandling: AnyObject {
     var authorizationStatus: WidgetNotificationAuthorizationStatus { get }
@@ -2400,6 +3195,7 @@ final class WidgetHostAPI {
     private let network: WidgetHostNetworkHandling
     private let media: WidgetHostMediaHandling
     private let audio: WidgetHostAudioHandling
+    private let events: WidgetHostEventsHandling
     private let notifications: WidgetHostNotificationHandling?
     private let resolveWidgetID: (UUID) -> String?
     private let resolveWidgetDefinition: (UUID) -> WidgetDefinition?
@@ -2413,6 +3209,7 @@ final class WidgetHostAPI {
         network: WidgetHostNetworkHandling,
         media: WidgetHostMediaHandling? = nil,
         audio: WidgetHostAudioHandling? = nil,
+        events: WidgetHostEventsHandling? = nil,
         notifications: WidgetHostNotificationHandling? = nil,
         resolveWidgetID: @escaping (UUID) -> String?,
         resolveWidgetDefinition: @escaping (UUID) -> WidgetDefinition? = { _ in nil },
@@ -2420,11 +3217,13 @@ final class WidgetHostAPI {
     ) {
         let resolvedMedia = media ?? WidgetHostMediaService(log: log)
         let resolvedAudio = audio ?? WidgetHostAudioService(log: log)
+        let resolvedEvents = events ?? WidgetHostEventsService(log: log)
         self.sessionManager = sessionManager
         self.storage = storage
         self.network = network
         self.media = resolvedMedia
         self.audio = resolvedAudio
+        self.events = resolvedEvents
         self.notifications = notifications
         self.resolveWidgetID = resolveWidgetID
         self.resolveWidgetDefinition = resolveWidgetDefinition
@@ -2666,6 +3465,57 @@ final class WidgetHostAPI {
             )
             audio.stopAll(instanceID: instanceID)
             return .null
+        case "events.getSnapshot":
+            try requireEventsCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            let eventParams = try decode(params, as: RuntimeEventsSnapshotParams.self)
+            let capabilityAccessLevel = widgetDefinition?.eventAccessLevel ?? .fullAccess
+            return try encodeRuntimeJSONValue(
+                events.getSnapshot(
+                    params: eventParams,
+                    capabilityAccessLevel: capabilityAccessLevel
+                )
+            )
+        case "events.listCalendars":
+            try requireEventsCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            let capabilityAccessLevel = widgetDefinition?.eventAccessLevel ?? .fullAccess
+            return try encodeRuntimeJSONValue(
+                events.listCalendars(capabilityAccessLevel: capabilityAccessLevel)
+            )
+        case "events.requestAccess":
+            try requireEventsCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            let eventParams = try decode(params, as: RuntimeEventsRequestAccessParams.self)
+            let requestedLevel = eventParams.level ?? .fullAccess
+            let capabilityAccessLevel = widgetDefinition?.eventAccessLevel ?? .fullAccess
+            return try encodeRuntimeJSONValue(
+                try await events.requestAccess(
+                    level: requestedLevel,
+                    capabilityAccessLevel: capabilityAccessLevel
+                )
+            )
+        case "events.openEvent":
+            try requireEventsCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            let eventParams = try decode(params, as: RuntimeEventOpenParams.self)
+            try await events.openEvent(eventParams)
+            return .null
+        case "events.openSourceApp":
+            try requireEventsCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            try await events.openSourceApp()
+            return .null
         case "notifications.schedule":
             guard let notifications else {
                 throw RuntimeTransportRPCError(
@@ -2807,6 +3657,21 @@ final class WidgetHostAPI {
         throw RuntimeTransportRPCError(
             code: -32030,
             message: "Widget '\(widgetID)' does not declare audio support.",
+            data: nil
+        )
+    }
+
+    private func requireEventsCapability(
+        for widgetID: String,
+        widgetDefinition: WidgetDefinition?
+    ) throws {
+        if widgetDefinition?.supportsEvents == true {
+            return
+        }
+
+        throw RuntimeTransportRPCError(
+            code: -32030,
+            message: "Widget '\(widgetID)' does not declare events support.",
             data: nil
         )
     }

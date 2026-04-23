@@ -1,0 +1,31 @@
+{
+  "name": "@skylane/widget-calendar",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "develop": "skylane develop",
+    "build": "skylane build",
+    "lint": "skylane lint"
+  },
+  "devDependencies": {
+    "skylane": "^0.1.1"
+  },
+  "dependencies": {
+    "@skylane/api": "^0.1.1"
+  },
+  "skylane": {
+    "id": "com.skylaneapp.calendar",
+    "title": "Calendar",
+    "description": "Today's upcoming schedule",
+    "icon": "calendar",
+    "theme": "blue",
+    "minSpan": 3,
+    "maxSpan": 9,
+    "entry": "src/index.tsx",
+    "capabilities": {
+      "events": {
+        "access": "fullAccess"
+      }
+    }
+  }
+}

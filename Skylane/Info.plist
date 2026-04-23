@@ -17,6 +17,12 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Skylane uses the camera to provide camera capabilities to widgets.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Skylane uses calendar access to provide event data to widgets you enable.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Skylane uses calendar access to provide event data to widgets you enable.</string>
+	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+	<string>Skylane uses calendar access to support widgets that create calendar events.</string>
 	<key>SUAutomaticallyUpdate</key>
 	<false/>
 	<key>SUEnableAutomaticChecks</key>

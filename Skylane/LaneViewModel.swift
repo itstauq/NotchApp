@@ -335,12 +335,24 @@ final class WidgetRuntimeController {
                 self?.log.write(message)
             }
         )
+        let eventsService = WidgetHostEventsService(
+            onStateChange: { [weak self] in
+                self?.broadcastHostEvent(
+                    named: "events.changed",
+                    payload: ["revisionMs": Date().timeIntervalSince1970 * 1000]
+                )
+            },
+            log: { [weak self] message in
+                self?.log.write(message)
+            }
+        )
         hostAPI = WidgetHostAPI(
             sessionManager: sessionManager,
             storage: storageManager,
             network: WidgetHostNetworkService(),
             media: mediaService,
             audio: audioService,
+            events: eventsService,
             notifications: WidgetNotificationService.shared,
             resolveWidgetID: { [weak self] instanceID in
                 self?.mountedWidgets[instanceID]?.definition.id

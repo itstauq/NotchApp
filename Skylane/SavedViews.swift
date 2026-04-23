@@ -99,6 +99,18 @@ struct WidgetDefinition: Identifiable, Codable, Equatable {
         capabilities?.audio != nil
     }
 
+    var supportsEvents: Bool {
+        capabilities?.events != nil
+    }
+
+    var supportsEventReadAccess: Bool {
+        capabilities?.events?.resolvedAccessLevel == .fullAccess
+    }
+
+    var eventAccessLevel: WidgetEventsAccessLevel? {
+        capabilities?.events?.resolvedAccessLevel
+    }
+
     private var fallbackTheme: WidgetTheme {
         let themes = WidgetTheme.allCases
         return themes[stableThemeSeed % themes.count]
@@ -263,11 +275,25 @@ enum WidgetTheme: String, Codable, Equatable, CaseIterable {
 struct WidgetCapabilitiesDefinition: Codable, Equatable {
     var audio: WidgetAudioCapabilityDefinition? = nil
     var notifications: WidgetNotificationCapabilityDefinition? = nil
+    var events: WidgetEventsCapabilityDefinition? = nil
 }
 
 struct WidgetAudioCapabilityDefinition: Codable, Equatable {}
 
 struct WidgetNotificationCapabilityDefinition: Codable, Equatable {
+}
+
+enum WidgetEventsAccessLevel: String, Codable, Equatable {
+    case writeOnly
+    case fullAccess
+}
+
+struct WidgetEventsCapabilityDefinition: Codable, Equatable {
+    var access: WidgetEventsAccessLevel? = nil
+
+    var resolvedAccessLevel: WidgetEventsAccessLevel {
+        access ?? .fullAccess
+    }
 }
 
 struct WidgetResolvedTheme: Codable, Equatable {
@@ -530,6 +556,7 @@ struct WidgetManifest: Codable {
         var capabilities: WidgetCapabilitiesDefinition?
         var audio: WidgetAudioCapabilityDefinition?
         var notifications: WidgetNotificationCapabilityDefinition?
+        var events: WidgetEventsCapabilityDefinition?
         var minSpan: Int
         var maxSpan: Int
         var description: String?
@@ -541,13 +568,14 @@ struct WidgetManifest: Codable {
                 return capabilities
             }
 
-            guard audio != nil || notifications != nil else {
+            guard audio != nil || notifications != nil || events != nil else {
                 return nil
             }
 
             return WidgetCapabilitiesDefinition(
                 audio: audio,
-                notifications: notifications
+                notifications: notifications,
+                events: events
             )
         }
     }
@@ -1375,6 +1403,7 @@ final class ViewManager {
             ].compactMap { $0 }
         case SavedView.planID:
             widgets = [
+                widget("com.skylaneapp.calendar", 0, 3)
             ].compactMap { $0 }
         default:
             widgets = []

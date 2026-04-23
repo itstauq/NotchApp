@@ -77,7 +77,7 @@ export default function Widget({ environment }) {
 - `Button`, `Row`, `IconButton`, `Checkbox`, `Input`
 - `ScrollView`, `Divider`, `Circle`, `RoundedRect`, `Camera`, `Menu`
 - `LocalStorage`
-- `useLocalStorage`, `usePreference`, `useCameras`, `useAudio`, `useMedia`, `useTheme`, `usePromise`, `useFetch`
+- `useLocalStorage`, `usePreference`, `useCameras`, `useAudio`, `useMedia`, `useEvents`, `useEventCalendars`, `useTheme`, `usePromise`, `useFetch`
 - `openURL`
 
 ## Theme, Preferences, And Host Data
@@ -104,17 +104,19 @@ React-style callback aliases are preferred:
 - `Checkbox` and `DropdownMenuCheckboxItem` support `onCheckedChange`
 - `Input` supports `onValueChange` and `onSubmitValue`
 
-Use the host data APIs in three patterns:
+Use the host data APIs in four patterns:
 
 - `usePreference("name")` for manifest-backed configuration values
 - `useCameras()` for host-backed resources with selection state
 - `useAudio()` for host-backed bundled audio playback
 - `useMedia()` for host-backed now-playing state and transport controls
+- `useEvents(query)` and `useEventCalendars()` for EventKit-backed calendar data
 - `usePromise()` only for advanced custom async flows
 
 `useCameras()` follows the shared resource shape: `items`, `value`, `setValue`, `isLoading`, `isPending`, `error`, `refresh`.
 `useAudio()` follows the same pattern and returns `playbackState`, `players`, `isLoading`, `isPending`, `error`, `refresh`, plus `play()`, `pause()`, `togglePlayPause()`, `stop()`, `setVolume()`, `pauseAll()`, `resumeAll()`, and `stopAll()`. Audio sources must be widget-relative bundled assets such as `assets/rain.wav`.
 `useMedia()` follows the same pattern and returns media state plus `play()`, `pause()`, `togglePlayPause()`, `nextTrack()`, `previousTrack()`, and `openSourceApp()`. Media updates are pushed from the host, action methods send transport commands without locally overwriting state, and `refresh()` is available for manual re-fetches when a widget wants an explicit sync point.
+`useEvents(query)` returns a query-scoped event snapshot with `authorizationStatus`, `accessLevel`, `items`, `isLoading`, `isPending`, `error`, `refresh`, `requestAccess()`, `openEvent()`, and `openSourceApp()`. `useEventCalendars()` returns the same shared status fields plus normalized calendar metadata for building filters and legends. Both refetch when the host invalidates calendar data.
 
 ```tsx
 import { Text, useAudio, useCameras, useMedia, usePreference } from "@skylane/api";

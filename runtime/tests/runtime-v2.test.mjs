@@ -494,6 +494,177 @@ test("runtime-v2 forwards host events to mounted workers so useAudio can update 
   assert.equal(pushedRender.params.data.props.text, "playing");
 });
 
+test("runtime-v2 refetches events queries after invalidation host events", async (t) => {
+  const dir = createTempDir(t, "skylane-runtime-v2-events-host-event-");
+  const bundlePath = path.join(dir, "bundle.cjs");
+
+  fs.writeFileSync(
+    bundlePath,
+    [
+      'const React = require("react");',
+      'const { useEvents } = require("@skylane/api");',
+      "module.exports.default = function Widget() {",
+      "  const events = useEvents({",
+      "    startMs: 1710000000000,",
+      "    endMs: 1710086400000,",
+      "    includeAllDay: true,",
+      "    limit: 3,",
+      "  });",
+      '  return React.createElement("Text", null, events.isLoading ? "loading" : String(events.items[0]?.title ?? "empty"));',
+      "};",
+      "",
+    ].join("\n")
+  );
+
+  const runtime = createRuntimeHarness(t);
+  const instanceId = "instance-events-host-event-1";
+
+  runtime.send({
+    jsonrpc: "2.0",
+    id: "mount-events-host-event-1",
+    method: "mount",
+    params: {
+      widgetId: "test.widget",
+      instanceId,
+      bundlePath,
+      props: {
+        environment: {
+          widgetId: "test.widget",
+          instanceId,
+          viewId: "view-1",
+          span: 1,
+          hostColumnCount: 4,
+          isEditing: false,
+          isDevelopment: false,
+        },
+      },
+    },
+  });
+
+  const mountResponse = await runtime.waitFor(
+    (message) => message.id === "mount-events-host-event-1",
+    "the mount response"
+  );
+  const sessionId = mountResponse.result?.sessionId;
+  assert.equal(typeof sessionId, "string");
+
+  await runtime.waitFor(
+    (message) => message.method === "render"
+      && message.params?.sessionId === sessionId
+      && message.params?.kind === "full"
+      && message.params?.data?.props?.text === "loading",
+    "the initial events loading render"
+  );
+
+  const initialSnapshotRequest = await runtime.waitFor(
+    (message) => message.method === "rpc" && message.params?.method === "events.getSnapshot",
+    "the initial events.getSnapshot rpc"
+  );
+  runtime.send({
+    jsonrpc: "2.0",
+    id: initialSnapshotRequest.id,
+    result: {
+      value: {
+        authorizationStatus: "fullAccess",
+        accessLevel: "fullAccess",
+        items: [
+          {
+            id: "ek:alpha#1",
+            calendarID: "work",
+            title: "Morning Standup",
+            location: "Zoom",
+            startMs: 1710000000000,
+            endMs: 1710003600000,
+            isAllDay: false,
+            isCurrent: false,
+            isPast: false,
+            isUpcoming: true,
+          },
+        ],
+      },
+    },
+  });
+
+  runtime.send({
+    jsonrpc: "2.0",
+    method: "requestFullTree",
+    params: {
+      instanceId,
+      sessionId,
+    },
+  });
+
+  await runtime.waitFor(
+    (message) => message.method === "render"
+      && message.params?.sessionId === sessionId
+      && message.params?.kind === "full"
+      && message.params?.data?.props?.text === "Morning Standup",
+    "the initial events render"
+  );
+
+  runtime.send({
+    jsonrpc: "2.0",
+    method: "hostEvent",
+    params: {
+      instanceId,
+      sessionId,
+      name: "events.changed",
+      payload: {
+        revisionMs: 1,
+      },
+    },
+  });
+
+  const refreshedSnapshotRequest = await runtime.waitFor(
+    (message) => message.method === "rpc"
+      && message.params?.method === "events.getSnapshot"
+      && message.id !== initialSnapshotRequest.id,
+    "the refreshed events.getSnapshot rpc"
+  );
+  runtime.send({
+    jsonrpc: "2.0",
+    id: refreshedSnapshotRequest.id,
+    result: {
+      value: {
+        authorizationStatus: "fullAccess",
+        accessLevel: "fullAccess",
+        items: [
+          {
+            id: "ek:beta#2",
+            calendarID: "work",
+            title: "Sprint Planning",
+            location: "Room 3",
+            startMs: 1710007200000,
+            endMs: 1710010800000,
+            isAllDay: false,
+            isCurrent: true,
+            isPast: false,
+            isUpcoming: false,
+          },
+        ],
+      },
+    },
+  });
+
+  runtime.send({
+    jsonrpc: "2.0",
+    method: "requestFullTree",
+    params: {
+      instanceId,
+      sessionId,
+    },
+  });
+
+  const refreshedRender = await runtime.waitFor(
+    (message) => message.method === "render"
+      && message.params?.sessionId === sessionId
+      && message.params?.kind === "full"
+      && message.params?.data?.props?.text === "Sprint Planning",
+    "the refreshed events render"
+  );
+  assert.equal(refreshedRender.params.data.props.text, "Sprint Planning");
+});
+
 test("runtime-v2 exposes resolved preferences through usePreference and resyncs on prop updates", async (t) => {
   const dir = createTempDir(t, "skylane-runtime-v2-preferences-");
   const bundlePath = path.join(dir, "bundle.cjs");

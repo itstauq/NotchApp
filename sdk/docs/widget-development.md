@@ -345,6 +345,81 @@ Users control notifications in two places:
 - General settings contains the global widget notifications switch
 - Widget settings contains the per-instance notification switch for widgets that declare support
 
+### Events
+
+Use widget events when the host should read calendar data on the widget's behalf through EventKit. Typical examples:
+
+- compact agenda widgets
+- "next meeting" widgets
+- planning widgets that filter by calendar
+
+Events are host-managed and query-based, not widget-managed. The widget requests normalized calendar metadata or event occurrences, while Skylane owns:
+
+- EventKit permission handling
+- loading and normalizing calendar metadata
+- fetching event occurrences within a time window
+- invalidating stale data when the system calendar database changes
+- opening Calendar or jumping to the relevant event time
+
+To opt in, declare events support in the manifest:
+
+```json
+{
+  "skylane": {
+    "id": "com.acme.agenda",
+    "title": "Agenda",
+    "icon": "calendar",
+    "minSpan": 3,
+    "maxSpan": 6,
+    "entry": "src/index.tsx",
+    "capabilities": {
+      "events": {
+        "access": "fullAccess"
+      }
+    }
+  }
+}
+```
+
+`capabilities.events` is optional. If it is missing, the widget cannot call the host events RPCs.
+
+In widget code, use `useEvents()` and `useEventCalendars()`:
+
+```tsx
+import { Button, Text, useEventCalendars, useEvents } from "@skylane/api";
+
+export default function Widget() {
+  const events = useEvents({
+    startMs: Date.now(),
+    endMs: Date.now() + 6 * 60 * 60 * 1000,
+    includeAllDay: true,
+    limit: 5,
+  });
+  const calendars = useEventCalendars();
+
+  if (events.authorizationStatus === "notDetermined") {
+    return <Button title="Connect Calendar" onClick={() => events.requestAccess()} />;
+  }
+
+  return (
+    <>
+      <Text variant="body">{events.items[0]?.title ?? "No upcoming events"}</Text>
+      <Text variant="caption">{`Calendars: ${calendars.items.length}`}</Text>
+    </>
+  );
+}
+```
+
+Important behavior:
+
+- v1 is read-only; widgets can read event data but not create or edit events
+- `fullAccess` is required to read events and calendars
+- `writeOnly` is modeled for future compatibility but does not unlock readable event data
+- rendering a widget never auto-prompts for calendar permission
+- call `requestAccess()` from a user-visible CTA such as "Connect Calendar"
+- `useEvents()` refetches the current query after the host invalidates event data
+- `useEventCalendars()` returns normalized calendar metadata for filters, legends, and settings UIs
+
 ### Audio
 
 Use widget audio when the host should play bundled local sound assets on the widget's behalf. Typical examples:
@@ -457,6 +532,7 @@ Optional fields:
 
 - `audio`
 - `notifications`
+- `events`
 
 Example manifest with preferences plus audio and notifications:
 
@@ -607,6 +683,8 @@ Other host-backed APIs available through `@skylane/api`:
 - `useCameras()` for camera selection
 - `useAudio()` for bundled local audio playback
 - `useMedia()` for now-playing data and transport controls
+- `useEvents()` for query-based calendar event occurrences
+- `useEventCalendars()` for calendar metadata and filter UIs
 - `useFetch()` and `usePromise()` for advanced async flows
 - `openURL()` for opening external links
 

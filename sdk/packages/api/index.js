@@ -7,6 +7,8 @@ const { usePreference } = require("./hooks/usePreference");
 const { useCameras } = require("./hooks/useCameras");
 const { useAudio } = require("./hooks/useAudio");
 const { useMedia } = require("./hooks/useMedia");
+const { useEvents } = require("./hooks/useEvents");
+const { useEventCalendars } = require("./hooks/useEventCalendars");
 const { openURL } = require("./functions/openURL");
 const { scheduleNotification, cancelNotification } = require("./functions/notifications");
 const { LocalStorage } = require("./runtime");
@@ -1166,6 +1168,8 @@ module.exports = {
   useCameras,
   useAudio,
   useMedia,
+  useEvents,
+  useEventCalendars,
   usePromise,
   useFetch,
   useTheme,

@@ -143,6 +143,38 @@ function loadAPI() {
               };
             },
           };
+        case "./hooks/useEvents":
+          return {
+            useEvents() {
+              return {
+                authorizationStatus: "notDetermined",
+                accessLevel: "none",
+                items: [],
+                isLoading: false,
+                isPending: false,
+                error: undefined,
+                refresh() {},
+                requestAccess() {},
+                openEvent() {},
+                openSourceApp() {},
+              };
+            },
+          };
+        case "./hooks/useEventCalendars":
+          return {
+            useEventCalendars() {
+              return {
+                authorizationStatus: "notDetermined",
+                accessLevel: "none",
+                items: [],
+                isLoading: false,
+                isPending: false,
+                error: undefined,
+                refresh() {},
+                requestAccess() {},
+              };
+            },
+          };
         case "./functions/openURL":
           return { openURL() {} };
         case "./functions/notifications":
@@ -192,6 +224,8 @@ test("@skylane/api exports the extended non-image component surface", () => {
     "useCameras",
     "useAudio",
     "useMedia",
+    "useEvents",
+    "useEventCalendars",
     "scheduleNotification",
     "cancelNotification",
     "DropdownMenuLoadingItem",

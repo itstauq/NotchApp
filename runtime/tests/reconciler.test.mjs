@@ -1327,6 +1327,290 @@ test("useAudio suppresses unhandled rejections for ignored action promises", asy
   }
 });
 
+test("useEvents loads event occurrences, refetches on invalidation, and exposes actions", async () => {
+  resetMockRuntime();
+
+  const snapshots = [
+    {
+      authorizationStatus: "fullAccess",
+      accessLevel: "fullAccess",
+      items: [
+        {
+          id: "ek:alpha#1",
+          calendarID: "work",
+          title: "Morning Standup",
+          location: "Zoom",
+          url: "https://meet.example.com/standup",
+          startMs: 1_710_000_000_000,
+          endMs: 1_710_000_900_000,
+          isAllDay: false,
+          isCurrent: false,
+          isPast: false,
+          isUpcoming: true,
+        },
+      ],
+    },
+    {
+      authorizationStatus: "fullAccess",
+      accessLevel: "fullAccess",
+      items: [
+        {
+          id: "ek:beta#2",
+          calendarID: "work",
+          title: "Sprint Planning",
+          location: "Room 3",
+          startMs: 1_710_001_000_000,
+          endMs: 1_710_001_900_000,
+          isAllDay: false,
+          isCurrent: true,
+          isPast: false,
+          isUpcoming: false,
+        },
+      ],
+    },
+  ];
+  let snapshotIndex = 0;
+  const rpcCalls = [];
+  rpcHandler = async (method, params) => {
+    rpcCalls.push({ method, params });
+
+    if (method === "events.getSnapshot") {
+      const result = snapshots[Math.min(snapshotIndex, snapshots.length - 1)];
+      snapshotIndex += 1;
+      return result;
+    }
+
+    if (
+      method === "events.requestAccess"
+      || method === "events.openEvent"
+      || method === "events.openSourceApp"
+    ) {
+      return null;
+    }
+
+    throw new Error(`Unexpected RPC: ${method}`);
+  };
+
+  const renderer = createRenderer();
+  const commits = [];
+  renderer.onCommit((payload) => {
+    commits.push(payload);
+  });
+
+  function EventsWidget() {
+    const events = api.useEvents({
+      startMs: 1_710_000_000_000,
+      endMs: 1_710_086_400_000,
+      calendarIDs: ["work"],
+      includeAllDay: true,
+      limit: 5,
+    });
+
+    return React.createElement(
+      "Stack",
+      null,
+      React.createElement("Text", null, events.authorizationStatus),
+      React.createElement("Text", null, events.items[0]?.title ?? "missing"),
+      React.createElement("Text", null, events.items[0]?.url ?? "no-url"),
+      React.createElement("Button", {
+        title: "Access",
+        onPress: () => {
+          events.requestAccess();
+        },
+      }),
+      React.createElement("Button", {
+        title: "Open Event",
+        onPress: () => {
+          events.openEvent(events.items[0]?.id ?? "");
+        },
+      }),
+      React.createElement("Button", {
+        title: "Open Calendar",
+        onPress: () => {
+          events.openSourceApp();
+        },
+      }),
+    );
+  }
+
+  renderer.render(React.createElement(EventsWidget));
+  await flushEffects();
+  await flushEffects();
+  renderer.emitFullTree();
+
+  let tree = commits.at(-1).data;
+  assert.equal(tree.children[0].props.text, "fullAccess");
+  assert.equal(tree.children[1].props.text, "Morning Standup");
+  assert.equal(tree.children[2].props.text, "https://meet.example.com/standup");
+
+  invokeCallback(tree.children[3].props.onPress);
+  invokeCallback(tree.children[4].props.onPress);
+  invokeCallback(tree.children[5].props.onPress);
+  await flushEffects();
+  await flushEffects();
+
+  emitMockHostEvent("events.changed", { revisionMs: 1 });
+  await flushEffects();
+  await flushEffects();
+  renderer.emitFullTree();
+
+  tree = commits.at(-1).data;
+  assert.equal(tree.children[1].props.text, "Sprint Planning");
+  assert.deepEqual(rpcCalls, [
+    {
+      method: "events.getSnapshot",
+      params: {
+        startMs: 1_710_000_000_000,
+        endMs: 1_710_086_400_000,
+        calendarIDs: ["work"],
+        includeAllDay: true,
+        limit: 5,
+      },
+    },
+    {
+      method: "events.requestAccess",
+      params: { level: "fullAccess" },
+    },
+    {
+      method: "events.openEvent",
+      params: { eventID: "ek:alpha#1" },
+    },
+    {
+      method: "events.openSourceApp",
+      params: {},
+    },
+    {
+      method: "events.getSnapshot",
+      params: {
+        startMs: 1_710_000_000_000,
+        endMs: 1_710_086_400_000,
+        calendarIDs: ["work"],
+        includeAllDay: true,
+        limit: 5,
+      },
+    },
+    {
+      method: "events.getSnapshot",
+      params: {
+        startMs: 1_710_000_000_000,
+        endMs: 1_710_086_400_000,
+        calendarIDs: ["work"],
+        includeAllDay: true,
+        limit: 5,
+      },
+    },
+  ]);
+});
+
+test("useEventCalendars loads calendars and refreshes after invalidation", async () => {
+  resetMockRuntime();
+
+  const calendarSnapshots = [
+    {
+      authorizationStatus: "fullAccess",
+      accessLevel: "fullAccess",
+      items: [
+        {
+          id: "work",
+          title: "Work",
+          color: "#63ADFA",
+          source: { id: "icloud", title: "iCloud", kind: "caldav" },
+          allowsContentModifications: true,
+          isDefaultForNewEvents: true,
+        },
+      ],
+    },
+    {
+      authorizationStatus: "fullAccess",
+      accessLevel: "fullAccess",
+      items: [
+        {
+          id: "work",
+          title: "Work",
+          color: "#63ADFA",
+          source: { id: "icloud", title: "iCloud", kind: "caldav" },
+          allowsContentModifications: true,
+          isDefaultForNewEvents: true,
+        },
+        {
+          id: "personal",
+          title: "Personal",
+          color: "#FA757A",
+          source: { id: "icloud", title: "iCloud", kind: "caldav" },
+          allowsContentModifications: true,
+          isDefaultForNewEvents: false,
+        },
+      ],
+    },
+  ];
+  let calendarIndex = 0;
+  const rpcCalls = [];
+  rpcHandler = async (method, params) => {
+    rpcCalls.push({ method, params });
+
+    if (method === "events.listCalendars") {
+      const result = calendarSnapshots[Math.min(calendarIndex, calendarSnapshots.length - 1)];
+      calendarIndex += 1;
+      return result;
+    }
+
+    if (method === "events.requestAccess") {
+      return null;
+    }
+
+    throw new Error(`Unexpected RPC: ${method}`);
+  };
+
+  const renderer = createRenderer();
+  const commits = [];
+  renderer.onCommit((payload) => {
+    commits.push(payload);
+  });
+
+  function CalendarsWidget() {
+    const calendars = api.useEventCalendars();
+    return React.createElement(
+      "Stack",
+      null,
+      React.createElement("Text", null, calendars.authorizationStatus),
+      React.createElement("Text", null, String(calendars.items.length)),
+      React.createElement("Button", {
+        title: "Access",
+        onPress: () => {
+          calendars.requestAccess("writeOnly");
+        },
+      }),
+    );
+  }
+
+  renderer.render(React.createElement(CalendarsWidget));
+  await flushEffects();
+  await flushEffects();
+  renderer.emitFullTree();
+
+  let tree = commits.at(-1).data;
+  assert.equal(tree.children[0].props.text, "fullAccess");
+  assert.equal(tree.children[1].props.text, "1");
+
+  invokeCallback(tree.children[2].props.onPress);
+  await flushEffects();
+  await flushEffects();
+
+  emitMockHostEvent("events.changed", { revisionMs: 2 });
+  await flushEffects();
+  await flushEffects();
+  renderer.emitFullTree();
+
+  tree = commits.at(-1).data;
+  assert.equal(tree.children[1].props.text, "2");
+  assert.deepEqual(rpcCalls, [
+    { method: "events.listCalendars", params: {} },
+    { method: "events.requestAccess", params: { level: "writeOnly" } },
+    { method: "events.listCalendars", params: {} },
+    { method: "events.listCalendars", params: {} },
+  ]);
+});
+
 test("reconciler preserves stable node ids across keyed reorders", () => {
   const renderer = createRenderer();
   const commits = [];
