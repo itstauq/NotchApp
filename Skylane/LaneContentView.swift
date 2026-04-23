@@ -393,22 +393,7 @@ private struct EmptyWidgetState: View {
             .buttonStyle(.plain)
         } else {
             content
-                .overlay(alignment: .topTrailing) {
-                    EmptyViewEditHint()
-                        .offset(x: -74, y: -14)
-                        .allowsHitTesting(false)
-                }
         }
-    }
-}
-
-private struct EmptyViewEditHint: View {
-    var body: some View {
-        Image("TwistedArrow")
-            .resizable()
-            .interpolation(.high)
-            .opacity(0.85)
-            .frame(width: 200, height: 190)
     }
 }
 
