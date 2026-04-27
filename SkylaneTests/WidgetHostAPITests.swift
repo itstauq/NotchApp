@@ -30,29 +30,6 @@ final class WidgetHostAPITests: XCTestCase {
         XCTAssertNotNil(manifest.skylane.capabilities?.audio)
     }
 
-    func testWidgetManifestStillDecodesLegacyAudioAlias() throws {
-        let data = Data(
-            """
-            {
-              "name": "@skylane/widget-demo",
-              "version": "0.1.0",
-              "skylane": {
-                "id": "demo.widget",
-                "title": "Demo",
-                "icon": "speaker.wave.2.fill",
-                "minSpan": 3,
-                "maxSpan": 6,
-                "audio": {}
-              }
-            }
-            """.utf8
-        )
-
-        let manifest = try JSONDecoder().decode(WidgetManifest.self, from: data)
-
-        XCTAssertNotNil(manifest.skylane.resolvedCapabilities?.audio)
-    }
-
     func testWidgetManifestDecodesNotificationCapabilityFromCapabilitiesBlock() throws {
         let data = Data(
             """
@@ -78,7 +55,7 @@ final class WidgetHostAPITests: XCTestCase {
         XCTAssertNotNil(manifest.skylane.capabilities?.notifications)
     }
 
-    func testWidgetManifestStillDecodesLegacyNotificationAlias() throws {
+    func testWidgetManifestDecodesCalendarCapabilityAccessLevel() throws {
         let data = Data(
             """
             {
@@ -87,10 +64,15 @@ final class WidgetHostAPITests: XCTestCase {
               "skylane": {
                 "id": "demo.widget",
                 "title": "Demo",
-                "icon": "bell",
+                "icon": "calendar",
                 "minSpan": 3,
                 "maxSpan": 6,
-                "notifications": {}
+                "capabilities": {
+                  "calendar": {
+                    "purpose": "Show upcoming events.",
+                    "access": "writeOnly"
+                  }
+                }
               }
             }
             """.utf8
@@ -98,7 +80,55 @@ final class WidgetHostAPITests: XCTestCase {
 
         let manifest = try JSONDecoder().decode(WidgetManifest.self, from: data)
 
-        XCTAssertNotNil(manifest.skylane.resolvedCapabilities?.notifications)
+        XCTAssertEqual(manifest.skylane.capabilities?.calendar?.purpose, "Show upcoming events.")
+        XCTAssertEqual(manifest.skylane.capabilities?.calendar?.resolvedAccessLevel, .writeOnly)
+    }
+
+    func testWidgetManifestDecodesDenseCapabilityBlock() throws {
+        let data = Data(
+            """
+            {
+              "name": "@skylane/widget-demo",
+              "version": "0.1.0",
+              "skylane": {
+                "id": "demo.widget",
+                "title": "Demo",
+                "icon": "sparkles",
+                "minSpan": 3,
+                "maxSpan": 6,
+                "capabilities": {
+                  "audio": { "purpose": "Play bundled sounds." },
+                  "media": { "purpose": "Control now playing media." },
+                  "notifications": { "purpose": "Send timer alerts." },
+                  "calendar": { "purpose": "Show events.", "access": "fullAccess" },
+                  "camera": { "purpose": "Show camera preview." },
+                  "network": {
+                    "http": { "purpose": "Fetch remote JSON." },
+                    "tcp": { "purpose": "Connect to IMAP servers over TLS." }
+                  },
+                  "browser": {
+                    "openExternalURLs": { "purpose": "Open meeting links." }
+                  }
+                }
+              }
+            }
+            """.utf8
+        )
+
+        let capabilities = try JSONDecoder()
+            .decode(WidgetManifest.self, from: data)
+            .skylane
+            .capabilities
+
+        XCTAssertEqual(capabilities?.audio?.purpose, "Play bundled sounds.")
+        XCTAssertEqual(capabilities?.media?.purpose, "Control now playing media.")
+        XCTAssertEqual(capabilities?.notifications?.purpose, "Send timer alerts.")
+        XCTAssertEqual(capabilities?.calendar?.purpose, "Show events.")
+        XCTAssertEqual(capabilities?.calendar?.resolvedAccessLevel, .fullAccess)
+        XCTAssertEqual(capabilities?.camera?.purpose, "Show camera preview.")
+        XCTAssertEqual(capabilities?.network?.http?.purpose, "Fetch remote JSON.")
+        XCTAssertEqual(capabilities?.network?.tcp?.purpose, "Connect to IMAP servers over TLS.")
+        XCTAssertEqual(capabilities?.browser?.openExternalURLs?.purpose, "Open meeting links.")
     }
 
     func testNetworkServiceRejectsFileURLs() async {
@@ -437,6 +467,7 @@ final class WidgetHostAPITests: XCTestCase {
         let network = TestNetworkHandler()
         let media = TestMediaHandler()
         let instanceID = UUID()
+        let definition = makeWidgetDefinition(id: "demo.widget", supportsMedia: true)
         sessionManager.beginMount(instanceID: instanceID)
 
         let emptyState = WidgetHostMediaState.empty
@@ -449,6 +480,9 @@ final class WidgetHostAPITests: XCTestCase {
             media: media,
             resolveWidgetID: { id in
                 id == instanceID ? "demo.widget" : nil
+            },
+            resolveWidgetDefinition: { id in
+                id == instanceID ? definition : nil
             }
         )
 
@@ -477,6 +511,7 @@ final class WidgetHostAPITests: XCTestCase {
         let network = TestNetworkHandler()
         let media = TestMediaHandler()
         let instanceID = UUID()
+        let definition = makeWidgetDefinition(id: "demo.widget", supportsMedia: true)
         sessionManager.beginMount(instanceID: instanceID)
 
         let api = WidgetHostAPI(
@@ -486,6 +521,9 @@ final class WidgetHostAPITests: XCTestCase {
             media: media,
             resolveWidgetID: { id in
                 id == instanceID ? "demo.widget" : nil
+            },
+            resolveWidgetDefinition: { id in
+                id == instanceID ? definition : nil
             }
         )
 
@@ -518,6 +556,7 @@ final class WidgetHostAPITests: XCTestCase {
         let network = TestNetworkHandler()
         let media = TestMediaHandler()
         let instanceID = UUID()
+        let definition = makeWidgetDefinition(id: "demo.widget", supportsMedia: true)
         sessionManager.beginMount(instanceID: instanceID)
 
         let api = WidgetHostAPI(
@@ -527,6 +566,9 @@ final class WidgetHostAPITests: XCTestCase {
             media: media,
             resolveWidgetID: { id in
                 id == instanceID ? "demo.widget" : nil
+            },
+            resolveWidgetDefinition: { id in
+                id == instanceID ? definition : nil
             }
         )
 
@@ -1806,6 +1848,250 @@ final class WidgetHostAPITests: XCTestCase {
             XCTFail("Unexpected error: \(error)")
         }
     }
+
+    func testHandleRejectsTCPRPCForUndeclaredWidgets() async {
+        let methods: [(String, RuntimeJSONValue)] = [
+            (
+                "network.tcp.connect",
+                .object([
+                    "connectionId": .string("conn-1"),
+                    "host": .string("imap.example.com"),
+                    "port": .number(993)
+                ])
+            ),
+            (
+                "network.tcp.write",
+                .object([
+                    "connectionId": .string("conn-1"),
+                    "body": .string("SGVsbG8="),
+                    "bodyEncoding": .string("base64")
+                ])
+            ),
+            (
+                "network.tcp.read",
+                .object([
+                    "connectionId": .string("conn-1"),
+                    "requestId": .string("read-1")
+                ])
+            ),
+            (
+                "network.tcp.close",
+                .object([
+                    "connectionId": .string("conn-1")
+                ])
+            )
+        ]
+
+        for (method, params) in methods {
+            let sessionManager = WidgetSessionManager()
+            let storage = TestStorageHandler(result: .null)
+            let network = TestNetworkHandler()
+            let tcp = TestTCPHandler()
+            let instanceID = UUID()
+            let definition = makeWidgetDefinition(id: "demo.widget")
+            sessionManager.beginMount(instanceID: instanceID)
+            _ = sessionManager.acceptsWorkerSession(instanceID: instanceID, sessionId: "session-1")
+
+            let api = WidgetHostAPI(
+                sessionManager: sessionManager,
+                storage: storage,
+                network: network,
+                tcp: tcp,
+                resolveWidgetID: { id in
+                    id == instanceID ? "demo.widget" : nil
+                },
+                resolveWidgetDefinition: { id in
+                    id == instanceID ? definition : nil
+                }
+            )
+
+            do {
+                _ = try await api.handle(
+                    RuntimeTransportRequest(
+                        id: "1",
+                        method: "rpc",
+                        params: .object([
+                            "instanceId": .string(instanceID.uuidString),
+                            "sessionId": .string("session-1"),
+                            "method": .string(method),
+                            "params": params
+                        ])
+                    )
+                )
+                XCTFail("Expected \(method) to fail")
+            } catch let error as RuntimeTransportRPCError {
+                XCTAssertEqual(error.code, -32030)
+                XCTAssertTrue(tcp.calls.isEmpty)
+            } catch {
+                XCTFail("Unexpected error: \(error)")
+            }
+        }
+    }
+
+    func testHandleRoutesTCPRPCThroughWidgetHostAPI() async throws {
+        let sessionManager = WidgetSessionManager()
+        let storage = TestStorageHandler(result: .null)
+        let network = TestNetworkHandler(allowCancel: true)
+        let tcp = TestTCPHandler()
+        let instanceID = UUID()
+        let definition = makeWidgetDefinition(id: "demo.widget", supportsNetworkTCP: true)
+        sessionManager.beginMount(instanceID: instanceID)
+        _ = sessionManager.acceptsWorkerSession(instanceID: instanceID, sessionId: "session-1")
+
+        tcp.readPayload = RuntimeTCPReadResponsePayload(
+            body: Data("OK".utf8).base64EncodedString(),
+            bodyEncoding: "base64"
+        )
+
+        let api = WidgetHostAPI(
+            sessionManager: sessionManager,
+            storage: storage,
+            network: network,
+            tcp: tcp,
+            resolveWidgetID: { id in
+                id == instanceID ? "demo.widget" : nil
+            },
+            resolveWidgetDefinition: { id in
+                id == instanceID ? definition : nil
+            }
+        )
+
+        _ = try await api.handle(
+            RuntimeTransportRequest(
+                id: "1",
+                method: "rpc",
+                params: .object([
+                    "instanceId": .string(instanceID.uuidString),
+                    "sessionId": .string("session-1"),
+                    "method": .string("network.tcp.connect"),
+                    "params": .object([
+                        "connectionId": .string("conn-1"),
+                        "host": .string("imap.example.com"),
+                        "port": .number(993),
+                        "serverName": .string("imap.example.com")
+                    ])
+                ])
+            )
+        )
+
+        _ = try await api.handle(
+            RuntimeTransportRequest(
+                id: "2",
+                method: "rpc",
+                params: .object([
+                    "instanceId": .string(instanceID.uuidString),
+                    "sessionId": .string("session-1"),
+                    "method": .string("network.tcp.write"),
+                    "params": .object([
+                        "connectionId": .string("conn-1"),
+                        "body": .string(Data("A1 NOOP\r\n".utf8).base64EncodedString()),
+                        "bodyEncoding": .string("base64")
+                    ])
+                ])
+            )
+        )
+
+        let readResponse = try await api.handle(
+            RuntimeTransportRequest(
+                id: "3",
+                method: "rpc",
+                params: .object([
+                    "instanceId": .string(instanceID.uuidString),
+                    "sessionId": .string("session-1"),
+                    "method": .string("network.tcp.read"),
+                    "params": .object([
+                        "connectionId": .string("conn-1"),
+                        "requestId": .string("read-1")
+                    ])
+                ])
+            )
+        )
+
+        _ = try await api.handle(
+            RuntimeTransportRequest(
+                id: "4",
+                method: "rpc",
+                params: .object([
+                    "instanceId": .string(instanceID.uuidString),
+                    "sessionId": .string("session-1"),
+                    "method": .string("network.tcp.close"),
+                    "params": .object([
+                        "connectionId": .string("conn-1")
+                    ])
+                ])
+            )
+        )
+
+        _ = try await api.handle(
+            RuntimeTransportRequest(
+                id: "5",
+                method: "rpc",
+                params: .object([
+                    "instanceId": .string(instanceID.uuidString),
+                    "sessionId": .string("session-1"),
+                    "method": .string("request.cancel"),
+                    "params": .object([
+                        "requestId": .string("read-2")
+                    ])
+                ])
+            )
+        )
+
+        XCTAssertEqual(tcp.calls, ["connect", "write", "read", "close", "cancel"])
+        XCTAssertEqual(tcp.lastContext?.widgetID, "demo.widget")
+        XCTAssertEqual(tcp.lastContext?.instanceID, instanceID.uuidString)
+        XCTAssertEqual(tcp.lastContext?.sessionID, "session-1")
+        XCTAssertEqual(tcp.lastCancelRequestID, "read-2")
+
+        let decoded = try XCTUnwrap(readResponse).decode(as: DecodedRPCResponse<RuntimeTCPReadResponsePayload>.self)
+        XCTAssertEqual(decoded.value.body, Data("OK".utf8).base64EncodedString())
+        XCTAssertEqual(decoded.value.bodyEncoding, "base64")
+    }
+
+    func testHostTCPServiceRejectsInvalidConnectParams() async {
+        let service = WidgetHostTCPService()
+        let context = WidgetHostTCPContext(
+            widgetID: "demo.widget",
+            instanceID: UUID().uuidString,
+            sessionID: "session-1"
+        )
+
+        do {
+            try await service.connect(
+                RuntimeTCPConnectParams(
+                    connectionId: "conn-1",
+                    host: " ",
+                    port: 993,
+                    serverName: nil,
+                    timeoutMs: 1
+                ),
+                context: context
+            )
+            XCTFail("Expected blank host to fail")
+        } catch let error as RuntimeTransportRPCError {
+            XCTAssertEqual(error.code, -32602)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        do {
+            try await service.connect(
+                RuntimeTCPConnectParams(
+                    connectionId: "conn-2",
+                    host: "imap.example.com",
+                    port: 0,
+                    serverName: nil,
+                    timeoutMs: 1
+                ),
+                context: context
+            )
+            XCTFail("Expected invalid port to fail")
+        } catch let error as RuntimeTransportRPCError {
+            XCTAssertEqual(error.code, -32602)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
 }
 
 private func networkContext(
@@ -1920,6 +2206,12 @@ private final class TestStorageHandler: WidgetHostLocalStorageHandling {
 
 @MainActor
 private final class TestNetworkHandler: WidgetHostNetworkHandling {
+    var allowCancel: Bool
+
+    init(allowCancel: Bool = false) {
+        self.allowCancel = allowCancel
+    }
+
     func fetch(
         _ params: RuntimeFetchRequestParams,
         context: WidgetHostNetworkContext
@@ -1930,6 +2222,9 @@ private final class TestNetworkHandler: WidgetHostNetworkHandling {
     }
 
     func cancel(_ params: RuntimeCancelRequestParams) {
+        if allowCancel {
+            return
+        }
         XCTFail("Network handler should not be called in this test")
     }
 
@@ -1939,6 +2234,50 @@ private final class TestNetworkHandler: WidgetHostNetworkHandling {
     ) throws {
         _ = context
         XCTFail("Network handler should not be called in this test")
+    }
+}
+
+@MainActor
+private final class TestTCPHandler: WidgetHostTCPHandling {
+    var calls: [String] = []
+    var readPayload: RuntimeTCPReadResponsePayload?
+    var lastContext: WidgetHostTCPContext?
+    var lastCancelRequestID: String?
+    var removedInstanceID: String?
+
+    func connect(_ params: RuntimeTCPConnectParams, context: WidgetHostTCPContext) async throws {
+        _ = params
+        calls.append("connect")
+        lastContext = context
+    }
+
+    func write(_ params: RuntimeTCPWriteParams, context: WidgetHostTCPContext) async throws {
+        _ = params
+        calls.append("write")
+        lastContext = context
+    }
+
+    func read(_ params: RuntimeTCPReadParams, context: WidgetHostTCPContext) async throws -> RuntimeTCPReadResponsePayload? {
+        _ = params
+        calls.append("read")
+        lastContext = context
+        return readPayload
+    }
+
+    func close(_ params: RuntimeTCPCloseParams, context: WidgetHostTCPContext) throws {
+        _ = params
+        calls.append("close")
+        lastContext = context
+    }
+
+    func cancel(_ params: RuntimeCancelRequestParams) {
+        calls.append("cancel")
+        lastCancelRequestID = params.requestId
+    }
+
+    func removeInstance(_ instanceID: String) {
+        calls.append("removeInstance")
+        removedInstanceID = instanceID
     }
 }
 
@@ -2043,6 +2382,12 @@ private func makeWidgetDefinition(
     id: String,
     supportsNotifications: Bool = false,
     supportsAudio: Bool = false,
+    supportsMedia: Bool = false,
+    supportsCamera: Bool = false,
+    supportsCalendar: Bool = false,
+    supportsNetworkHTTP: Bool = false,
+    supportsNetworkTCP: Bool = false,
+    supportsBrowserOpenExternalURLs: Bool = false,
     packageDirectoryURL: URL? = nil
 ) -> WidgetDefinition {
     WidgetDefinition(
@@ -2051,10 +2396,31 @@ private func makeWidgetDefinition(
         icon: "bell",
         description: "Demo widget",
         theme: .blue,
-        capabilities: (supportsNotifications || supportsAudio)
+        capabilities: (
+            supportsNotifications
+            || supportsAudio
+            || supportsMedia
+            || supportsCamera
+            || supportsCalendar
+            || supportsNetworkHTTP
+            || supportsNetworkTCP
+            || supportsBrowserOpenExternalURLs
+        )
             ? WidgetCapabilitiesDefinition(
                 audio: supportsAudio ? WidgetAudioCapabilityDefinition() : nil,
-                notifications: supportsNotifications ? WidgetNotificationCapabilityDefinition() : nil
+                media: supportsMedia ? WidgetMediaCapabilityDefinition() : nil,
+                notifications: supportsNotifications ? WidgetNotificationCapabilityDefinition() : nil,
+                calendar: supportsCalendar ? WidgetCalendarCapabilityDefinition() : nil,
+                camera: supportsCamera ? WidgetCameraCapabilityDefinition() : nil,
+                network: (supportsNetworkHTTP || supportsNetworkTCP)
+                    ? WidgetNetworkCapabilityDefinition(
+                        http: supportsNetworkHTTP ? WidgetNetworkHTTPCapabilityDefinition() : nil,
+                        tcp: supportsNetworkTCP ? WidgetNetworkTCPCapabilityDefinition() : nil
+                    )
+                    : nil,
+                browser: supportsBrowserOpenExternalURLs
+                    ? WidgetBrowserCapabilityDefinition(openExternalURLs: WidgetBrowserOpenExternalURLsCapabilityDefinition())
+                    : nil
             )
             : nil,
         minSpan: 3,

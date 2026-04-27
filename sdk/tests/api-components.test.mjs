@@ -182,6 +182,8 @@ function loadAPI() {
             scheduleNotification() {},
             cancelNotification() {},
           };
+        case "./functions/tcp":
+          return { connectTCP() {} };
         case "./runtime":
           return {
             LocalStorage: {},
@@ -226,6 +228,7 @@ test("@skylane/api exports the extended non-image component surface", () => {
     "useMedia",
     "useEvents",
     "useEventCalendars",
+    "connectTCP",
     "scheduleNotification",
     "cancelNotification",
     "DropdownMenuLoadingItem",

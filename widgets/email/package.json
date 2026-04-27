@@ -1,0 +1,86 @@
+{
+  "name": "@skylane/widget-email",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "develop": "skylane develop",
+    "build": "skylane build",
+    "lint": "skylane lint"
+  },
+  "devDependencies": {
+    "skylane": "^0.1.1"
+  },
+  "dependencies": {
+    "@skylane/api": "^0.1.1"
+  },
+  "skylane": {
+    "id": "com.skylaneapp.email",
+    "title": "Email",
+    "description": "Unread triage",
+    "icon": "envelope.fill",
+    "theme": "pink",
+    "minSpan": 3,
+    "maxSpan": 6,
+    "entry": "src/index.tsx",
+    "capabilities": {
+      "network": {
+        "tcp": {
+          "purpose": "Connect to IMAP servers over TLS."
+        }
+      }
+    },
+    "preferences": [
+      {
+        "name": "email",
+        "title": "Email Address",
+        "description": "The address used to sign in to your mailbox.",
+        "type": "textfield",
+        "required": true,
+        "placeholder": "you@gmail.com"
+      },
+      {
+        "name": "password",
+        "title": "Password",
+        "description": "For Gmail, use a Google app password instead of your account password. Create one at https://myaccount.google.com/apppasswords.",
+        "type": "password",
+        "required": true,
+        "placeholder": "App password"
+      },
+      {
+        "name": "host",
+        "title": "IMAP Host",
+        "description": "Gmail uses imap.gmail.com.",
+        "type": "textfield",
+        "required": true,
+        "default": "imap.gmail.com",
+        "placeholder": "imap.gmail.com"
+      },
+      {
+        "name": "port",
+        "title": "IMAP Port",
+        "description": "Use 993 for IMAP over TLS.",
+        "type": "textfield",
+        "required": true,
+        "default": "993",
+        "placeholder": "993"
+      },
+      {
+        "name": "mailbox",
+        "title": "Mailbox",
+        "description": "The mailbox to display.",
+        "type": "textfield",
+        "required": true,
+        "default": "INBOX",
+        "placeholder": "INBOX"
+      },
+      {
+        "name": "maxRows",
+        "title": "Maximum Rows",
+        "description": "How many messages to show in the widget.",
+        "type": "textfield",
+        "default": "20",
+        "placeholder": "20"
+      }
+    ]
+  }
+}

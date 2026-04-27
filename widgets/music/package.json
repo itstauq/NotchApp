@@ -21,6 +21,11 @@
     "theme": "indigo",
     "minSpan": 3,
     "maxSpan": 3,
-    "entry": "src/index.tsx"
+    "entry": "src/index.tsx",
+    "capabilities": {
+      "media": {
+        "purpose": "Show and control the system's current media session."
+      }
+    }
   }
 }

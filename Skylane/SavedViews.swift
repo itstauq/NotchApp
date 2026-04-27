@@ -99,16 +99,36 @@ struct WidgetDefinition: Identifiable, Codable, Equatable {
         capabilities?.audio != nil
     }
 
-    var supportsEvents: Bool {
-        capabilities?.events != nil
+    var supportsMedia: Bool {
+        capabilities?.media != nil
+    }
+
+    var supportsCamera: Bool {
+        capabilities?.camera != nil
+    }
+
+    var supportsCalendar: Bool {
+        capabilities?.calendar != nil
     }
 
     var supportsEventReadAccess: Bool {
-        capabilities?.events?.resolvedAccessLevel == .fullAccess
+        capabilities?.calendar?.resolvedAccessLevel == .fullAccess
     }
 
     var eventAccessLevel: WidgetEventsAccessLevel? {
-        capabilities?.events?.resolvedAccessLevel
+        capabilities?.calendar?.resolvedAccessLevel
+    }
+
+    var supportsNetworkHTTP: Bool {
+        capabilities?.network?.http != nil
+    }
+
+    var supportsNetworkTCP: Bool {
+        capabilities?.network?.tcp != nil
+    }
+
+    var supportsBrowserOpenExternalURLs: Bool {
+        capabilities?.browser?.openExternalURLs != nil
     }
 
     private var fallbackTheme: WidgetTheme {
@@ -166,9 +186,25 @@ enum WidgetTheme: String, Codable, Equatable, CaseIterable {
                 theme: self,
                 colors: .palette(
                     background: "#1E232B",
+                    foreground: "#FFFFFFF0",
+                    card: "#FFFFFF10",
+                    cardForeground: "#FFFFFFF0",
+                    popover: "#00000047",
+                    popoverForeground: "#FFFFFFD6",
                     primary: "#404752",
                     primaryForeground: "#FFFFFFE0",
+                    secondary: "#FFFFFF0F",
+                    secondaryForeground: "#FFFFFFCC",
+                    muted: "#FFFFFF08",
+                    mutedForeground: "#FFFFFF8F",
+                    accent: "#4047522E",
                     accentForeground: "#FFFFFFF0",
+                    success: "#33D175",
+                    warning: "#FCAD59",
+                    destructive: "#FA6478",
+                    destructiveForeground: "#FFFFFFF0",
+                    border: "#FFFFFF1F",
+                    input: "#FFFFFF1F",
                     ring: "#69738552"
                 )
             )
@@ -176,96 +212,324 @@ enum WidgetTheme: String, Codable, Equatable, CaseIterable {
             return WidgetResolvedTheme.palette(
                 theme: self,
                 colors: .palette(
+                    background: "#1C1712",
+                    foreground: "#FFFFFFF0",
+                    card: "#3A2817CC",
+                    cardForeground: "#FFFFFFF0",
+                    popover: "#140D0847",
+                    popoverForeground: "#FFFFFFD6",
                     primary: "#FCAD59",
-                    primaryForeground: "#000000BF"
+                    primaryForeground: "#000000BF",
+                    secondary: "#FFFFFF0F",
+                    secondaryForeground: "#FFFFFFCC",
+                    muted: "#FFFFFF08",
+                    mutedForeground: "#FFFFFF8F",
+                    accent: "#FCAD592E",
+                    accentForeground: "#FFFFFFF0",
+                    success: "#33D175",
+                    warning: "#FCAD59",
+                    destructive: "#FA6478",
+                    destructiveForeground: "#FFFFFFF0",
+                    border: "#FFFFFF1F",
+                    input: "#FFFFFF1F",
+                    ring: "#FCAD5952"
                 )
             )
         case .blue:
             return WidgetResolvedTheme.palette(
                 theme: self,
                 colors: .palette(
+                    background: "#121820",
+                    foreground: "#FFFFFFF0",
+                    card: "#172A3DCC",
+                    cardForeground: "#FFFFFFF0",
+                    popover: "#08111B47",
+                    popoverForeground: "#FFFFFFD6",
                     primary: "#63ADFA",
-                    primaryForeground: "#000000BF"
+                    primaryForeground: "#000000BF",
+                    secondary: "#FFFFFF0F",
+                    secondaryForeground: "#FFFFFFCC",
+                    muted: "#FFFFFF08",
+                    mutedForeground: "#FFFFFF8F",
+                    accent: "#63ADFA2E",
+                    accentForeground: "#FFFFFFF0",
+                    success: "#33D175",
+                    warning: "#FCAD59",
+                    destructive: "#FA6478",
+                    destructiveForeground: "#FFFFFFF0",
+                    border: "#FFFFFF1F",
+                    input: "#FFFFFF1F",
+                    ring: "#63ADFA52"
                 )
             )
         case .cyan:
             return WidgetResolvedTheme.palette(
                 theme: self,
                 colors: .palette(
+                    background: "#121B20",
+                    foreground: "#FFFFFFF0",
+                    card: "#17303DCC",
+                    cardForeground: "#FFFFFFF0",
+                    popover: "#08141B47",
+                    popoverForeground: "#FFFFFFD6",
                     primary: "#8AC2FA",
-                    primaryForeground: "#000000BF"
+                    primaryForeground: "#000000BF",
+                    secondary: "#FFFFFF0F",
+                    secondaryForeground: "#FFFFFFCC",
+                    muted: "#FFFFFF08",
+                    mutedForeground: "#FFFFFF8F",
+                    accent: "#8AC2FA2E",
+                    accentForeground: "#FFFFFFF0",
+                    success: "#33D175",
+                    warning: "#FCAD59",
+                    destructive: "#FA6478",
+                    destructiveForeground: "#FFFFFFF0",
+                    border: "#FFFFFF1F",
+                    input: "#FFFFFF1F",
+                    ring: "#8AC2FA52"
                 )
             )
         case .emerald:
             return WidgetResolvedTheme.palette(
                 theme: self,
                 colors: .palette(
+                    background: "#111C16",
+                    foreground: "#FFFFFFF0",
+                    card: "#12321FCC",
+                    cardForeground: "#FFFFFFF0",
+                    popover: "#06120B47",
+                    popoverForeground: "#FFFFFFD6",
                     primary: "#33D175",
-                    primaryForeground: "#000000BF"
+                    primaryForeground: "#000000BF",
+                    secondary: "#FFFFFF0F",
+                    secondaryForeground: "#FFFFFFCC",
+                    muted: "#FFFFFF08",
+                    mutedForeground: "#FFFFFF8F",
+                    accent: "#33D1752E",
+                    accentForeground: "#FFFFFFF0",
+                    success: "#33D175",
+                    warning: "#FCAD59",
+                    destructive: "#FA6478",
+                    destructiveForeground: "#FFFFFFF0",
+                    border: "#FFFFFF1F",
+                    input: "#FFFFFF1F",
+                    ring: "#33D17552"
                 )
             )
         case .fuchsia:
             return WidgetResolvedTheme.palette(
                 theme: self,
                 colors: .palette(
+                    background: "#1B1220",
+                    foreground: "#FFFFFFF0",
+                    card: "#311740CC",
+                    cardForeground: "#FFFFFFF0",
+                    popover: "#12081847",
+                    popoverForeground: "#FFFFFFD6",
                     primary: "#B85CFA",
-                    primaryForeground: "#000000BF"
+                    primaryForeground: "#000000BF",
+                    secondary: "#FFFFFF0F",
+                    secondaryForeground: "#FFFFFFCC",
+                    muted: "#FFFFFF08",
+                    mutedForeground: "#FFFFFF8F",
+                    accent: "#B85CFA2E",
+                    accentForeground: "#FFFFFFF0",
+                    success: "#33D175",
+                    warning: "#FCAD59",
+                    destructive: "#FA6478",
+                    destructiveForeground: "#FFFFFFF0",
+                    border: "#FFFFFF1F",
+                    input: "#FFFFFF1F",
+                    ring: "#B85CFA52"
                 )
             )
         case .green:
             return WidgetResolvedTheme.palette(
                 theme: self,
                 colors: .palette(
+                    background: "#111C19",
+                    foreground: "#FFFFFFF0",
+                    card: "#16322BCC",
+                    cardForeground: "#FFFFFFF0",
+                    popover: "#06120F47",
+                    popoverForeground: "#FFFFFFD6",
                     primary: "#75D1B8",
-                    primaryForeground: "#000000BF"
+                    primaryForeground: "#000000BF",
+                    secondary: "#FFFFFF0F",
+                    secondaryForeground: "#FFFFFFCC",
+                    muted: "#FFFFFF08",
+                    mutedForeground: "#FFFFFF8F",
+                    accent: "#75D1B82E",
+                    accentForeground: "#FFFFFFF0",
+                    success: "#33D175",
+                    warning: "#FCAD59",
+                    destructive: "#FA6478",
+                    destructiveForeground: "#FFFFFFF0",
+                    border: "#FFFFFF1F",
+                    input: "#FFFFFF1F",
+                    ring: "#75D1B852"
                 )
             )
         case .indigo:
             return WidgetResolvedTheme.palette(
                 theme: self,
                 colors: .palette(
+                    background: "#171420",
+                    foreground: "#FFFFFFF0",
+                    card: "#251C3FCC",
+                    cardForeground: "#FFFFFFF0",
+                    popover: "#0D0A1A47",
+                    popoverForeground: "#FFFFFFD6",
                     primary: "#B08AFA",
-                    primaryForeground: "#000000BF"
+                    primaryForeground: "#000000BF",
+                    secondary: "#FFFFFF0F",
+                    secondaryForeground: "#FFFFFFCC",
+                    muted: "#FFFFFF08",
+                    mutedForeground: "#FFFFFF8F",
+                    accent: "#B08AFA2E",
+                    accentForeground: "#FFFFFFF0",
+                    success: "#33D175",
+                    warning: "#FCAD59",
+                    destructive: "#FA6478",
+                    destructiveForeground: "#FFFFFFF0",
+                    border: "#FFFFFF1F",
+                    input: "#FFFFFF1F",
+                    ring: "#B08AFA52"
                 )
             )
         case .lime:
             return WidgetResolvedTheme.palette(
                 theme: self,
                 colors: .palette(
+                    background: "#191C12",
+                    foreground: "#FFFFFFF0",
+                    card: "#2B3215CC",
+                    cardForeground: "#FFFFFFF0",
+                    popover: "#11130647",
+                    popoverForeground: "#FFFFFFD6",
                     primary: "#C7E36B",
-                    primaryForeground: "#000000BF"
+                    primaryForeground: "#000000BF",
+                    secondary: "#FFFFFF0F",
+                    secondaryForeground: "#FFFFFFCC",
+                    muted: "#FFFFFF08",
+                    mutedForeground: "#FFFFFF8F",
+                    accent: "#C7E36B2E",
+                    accentForeground: "#FFFFFFF0",
+                    success: "#33D175",
+                    warning: "#FCAD59",
+                    destructive: "#FA6478",
+                    destructiveForeground: "#FFFFFFF0",
+                    border: "#FFFFFF1F",
+                    input: "#FFFFFF1F",
+                    ring: "#C7E36B52"
                 )
             )
         case .orange:
             return WidgetResolvedTheme.palette(
                 theme: self,
                 colors: .palette(
+                    background: "#1F1510",
+                    foreground: "#FFFFFFF0",
+                    card: "#3B2113CC",
+                    cardForeground: "#FFFFFFF0",
+                    popover: "#150A0647",
+                    popoverForeground: "#FFFFFFD6",
                     primary: "#FC7A2E",
-                    primaryForeground: "#000000BF"
+                    primaryForeground: "#000000BF",
+                    secondary: "#FFFFFF0F",
+                    secondaryForeground: "#FFFFFFCC",
+                    muted: "#FFFFFF08",
+                    mutedForeground: "#FFFFFF8F",
+                    accent: "#FC7A2E2E",
+                    accentForeground: "#FFFFFFF0",
+                    success: "#33D175",
+                    warning: "#FCAD59",
+                    destructive: "#FA6478",
+                    destructiveForeground: "#FFFFFFF0",
+                    border: "#FFFFFF1F",
+                    input: "#FFFFFF1F",
+                    ring: "#FC7A2E52"
                 )
             )
         case .periwinkle:
             return WidgetResolvedTheme.palette(
                 theme: self,
                 colors: .palette(
+                    background: "#141820",
+                    foreground: "#FFFFFFF0",
+                    card: "#1C2940CC",
+                    cardForeground: "#FFFFFFF0",
+                    popover: "#0A0E1A47",
+                    popoverForeground: "#FFFFFFD6",
                     primary: "#8FADF5",
-                    primaryForeground: "#000000BF"
+                    primaryForeground: "#000000BF",
+                    secondary: "#FFFFFF0F",
+                    secondaryForeground: "#FFFFFFCC",
+                    muted: "#FFFFFF08",
+                    mutedForeground: "#FFFFFF8F",
+                    accent: "#8FADF52E",
+                    accentForeground: "#FFFFFFF0",
+                    success: "#33D175",
+                    warning: "#FCAD59",
+                    destructive: "#FA6478",
+                    destructiveForeground: "#FFFFFFF0",
+                    border: "#FFFFFF1F",
+                    input: "#FFFFFF1F",
+                    ring: "#8FADF552"
                 )
             )
         case .pink:
             return WidgetResolvedTheme.palette(
                 theme: self,
                 colors: .palette(
+                    background: "#201318",
+                    foreground: "#FFFFFFF0",
+                    card: "#351A23CC",
+                    cardForeground: "#FFFFFFF0",
+                    popover: "#16080E47",
+                    popoverForeground: "#FFFFFFD6",
                     primary: "#FA757A",
-                    primaryForeground: "#000000BF"
+                    primaryForeground: "#000000BF",
+                    secondary: "#FFFFFF0F",
+                    secondaryForeground: "#FFFFFFCC",
+                    muted: "#FFFFFF08",
+                    mutedForeground: "#FFFFFF8F",
+                    accent: "#FA757A2E",
+                    accentForeground: "#FFFFFFF0",
+                    success: "#33D175",
+                    warning: "#FCAD59",
+                    destructive: "#FA6478",
+                    destructiveForeground: "#FFFFFFF0",
+                    border: "#FFFFFF1F",
+                    input: "#FFFFFF1F",
+                    ring: "#FA757A52"
                 )
             )
         case .violet:
             return WidgetResolvedTheme.palette(
                 theme: self,
                 colors: .palette(
+                    background: "#191420",
+                    foreground: "#FFFFFFF0",
+                    card: "#2A1C40CC",
+                    cardForeground: "#FFFFFFF0",
+                    popover: "#0E0A1A47",
+                    popoverForeground: "#FFFFFFD6",
                     primary: "#B894FA",
-                    primaryForeground: "#000000BF"
+                    primaryForeground: "#000000BF",
+                    secondary: "#FFFFFF0F",
+                    secondaryForeground: "#FFFFFFCC",
+                    muted: "#FFFFFF08",
+                    mutedForeground: "#FFFFFF8F",
+                    accent: "#B894FA2E",
+                    accentForeground: "#FFFFFFF0",
+                    success: "#33D175",
+                    warning: "#FCAD59",
+                    destructive: "#FA6478",
+                    destructiveForeground: "#FFFFFFF0",
+                    border: "#FFFFFF1F",
+                    input: "#FFFFFF1F",
+                    ring: "#B894FA52"
                 )
             )
         }
@@ -274,13 +538,28 @@ enum WidgetTheme: String, Codable, Equatable, CaseIterable {
 
 struct WidgetCapabilitiesDefinition: Codable, Equatable {
     var audio: WidgetAudioCapabilityDefinition? = nil
+    var media: WidgetMediaCapabilityDefinition? = nil
     var notifications: WidgetNotificationCapabilityDefinition? = nil
-    var events: WidgetEventsCapabilityDefinition? = nil
+    var calendar: WidgetCalendarCapabilityDefinition? = nil
+    var camera: WidgetCameraCapabilityDefinition? = nil
+    var network: WidgetNetworkCapabilityDefinition? = nil
+    var browser: WidgetBrowserCapabilityDefinition? = nil
 }
 
-struct WidgetAudioCapabilityDefinition: Codable, Equatable {}
+struct WidgetAudioCapabilityDefinition: Codable, Equatable {
+    var purpose: String? = nil
+}
+
+struct WidgetMediaCapabilityDefinition: Codable, Equatable {
+    var purpose: String? = nil
+}
 
 struct WidgetNotificationCapabilityDefinition: Codable, Equatable {
+    var purpose: String? = nil
+}
+
+struct WidgetCameraCapabilityDefinition: Codable, Equatable {
+    var purpose: String? = nil
 }
 
 enum WidgetEventsAccessLevel: String, Codable, Equatable {
@@ -288,12 +567,34 @@ enum WidgetEventsAccessLevel: String, Codable, Equatable {
     case fullAccess
 }
 
-struct WidgetEventsCapabilityDefinition: Codable, Equatable {
+struct WidgetCalendarCapabilityDefinition: Codable, Equatable {
+    var purpose: String? = nil
     var access: WidgetEventsAccessLevel? = nil
 
     var resolvedAccessLevel: WidgetEventsAccessLevel {
         access ?? .fullAccess
     }
+}
+
+struct WidgetNetworkCapabilityDefinition: Codable, Equatable {
+    var http: WidgetNetworkHTTPCapabilityDefinition? = nil
+    var tcp: WidgetNetworkTCPCapabilityDefinition? = nil
+}
+
+struct WidgetNetworkHTTPCapabilityDefinition: Codable, Equatable {
+    var purpose: String? = nil
+}
+
+struct WidgetNetworkTCPCapabilityDefinition: Codable, Equatable {
+    var purpose: String? = nil
+}
+
+struct WidgetBrowserCapabilityDefinition: Codable, Equatable {
+    var openExternalURLs: WidgetBrowserOpenExternalURLsCapabilityDefinition? = nil
+}
+
+struct WidgetBrowserOpenExternalURLsCapabilityDefinition: Codable, Equatable {
+    var purpose: String? = nil
 }
 
 struct WidgetResolvedTheme: Codable, Equatable {
@@ -362,27 +663,27 @@ struct WidgetThemeColors: Codable, Equatable {
     var ring: String
 
     static func palette(
-        background: String = "#17191E",
-        foreground: String = "#FFFFFFF0",
-        card: String = "#FFFFFF10",
-        cardForeground: String = "#FFFFFFF0",
-        popover: String = "#00000047",
-        popoverForeground: String = "#FFFFFFD6",
+        background: String,
+        foreground: String,
+        card: String,
+        cardForeground: String,
+        popover: String,
+        popoverForeground: String,
         primary: String,
         primaryForeground: String,
-        secondary: String = "#FFFFFF0F",
-        secondaryForeground: String = "#FFFFFFCC",
-        muted: String = "#FFFFFF08",
-        mutedForeground: String = "#FFFFFF8F",
-        accent: String? = nil,
-        accentForeground: String = "#FFFFFFF0",
-        success: String = "#33D175",
-        warning: String = "#FCAD59",
-        destructive: String = "#FA6478",
-        destructiveForeground: String = "#FFFFFFF0",
-        border: String = "#FFFFFF1F",
-        input: String = "#FFFFFF1F",
-        ring: String? = nil
+        secondary: String,
+        secondaryForeground: String,
+        muted: String,
+        mutedForeground: String,
+        accent: String,
+        accentForeground: String,
+        success: String,
+        warning: String,
+        destructive: String,
+        destructiveForeground: String,
+        border: String,
+        input: String,
+        ring: String
     ) -> WidgetThemeColors {
         WidgetThemeColors(
             background: background,
@@ -397,7 +698,7 @@ struct WidgetThemeColors: Codable, Equatable {
             secondaryForeground: secondaryForeground,
             muted: muted,
             mutedForeground: mutedForeground,
-            accent: accent ?? primary.withAlpha("2E"),
+            accent: accent,
             accentForeground: accentForeground,
             success: success,
             warning: warning,
@@ -405,7 +706,7 @@ struct WidgetThemeColors: Codable, Equatable {
             destructiveForeground: destructiveForeground,
             border: border,
             input: input,
-            ring: ring ?? primary.withAlpha("52")
+            ring: ring
         )
     }
 }
@@ -448,13 +749,6 @@ struct WidgetThemeControls: Codable, Equatable {
     var iconButtonSize: Double
     var iconButtonLargeSize: Double
     var checkboxSize: Double
-}
-
-private extension String {
-    func withAlpha(_ alpha: String) -> String {
-        let normalized = hasPrefix("#") ? String(dropFirst()) : self
-        return "#\(normalized)\(alpha)"
-    }
 }
 
 enum WidgetPreferenceType: String, Codable, Equatable {
@@ -554,30 +848,11 @@ struct WidgetManifest: Codable {
         var icon: String
         var theme: WidgetTheme?
         var capabilities: WidgetCapabilitiesDefinition?
-        var audio: WidgetAudioCapabilityDefinition?
-        var notifications: WidgetNotificationCapabilityDefinition?
-        var events: WidgetEventsCapabilityDefinition?
         var minSpan: Int
         var maxSpan: Int
         var description: String?
         var entry: String?
         var preferences: [WidgetPreferenceDefinition]?
-
-        var resolvedCapabilities: WidgetCapabilitiesDefinition? {
-            if let capabilities {
-                return capabilities
-            }
-
-            guard audio != nil || notifications != nil || events != nil else {
-                return nil
-            }
-
-            return WidgetCapabilitiesDefinition(
-                audio: audio,
-                notifications: notifications,
-                events: events
-            )
-        }
     }
 
     var name: String
@@ -654,7 +929,7 @@ enum WidgetCatalog {
                     icon: skylaneManifest.icon,
                     description: skylaneManifest.description,
                     theme: skylaneManifest.theme,
-                    capabilities: skylaneManifest.resolvedCapabilities,
+                    capabilities: skylaneManifest.capabilities,
                     minSpan: skylaneManifest.minSpan,
                     maxSpan: skylaneManifest.maxSpan,
                     package: package,
@@ -1403,7 +1678,8 @@ final class ViewManager {
             ].compactMap { $0 }
         case SavedView.planID:
             widgets = [
-                widget("com.skylaneapp.calendar", 0, 3)
+                widget("com.skylaneapp.calendar", 0, 3),
+                widget("com.skylaneapp.email", 3, 3)
             ].compactMap { $0 }
         default:
             widgets = []

@@ -78,7 +78,7 @@ export default function Widget({ environment }) {
 - `ScrollView`, `Divider`, `Circle`, `RoundedRect`, `Camera`, `Menu`
 - `LocalStorage`
 - `useLocalStorage`, `usePreference`, `useCameras`, `useAudio`, `useMedia`, `useEvents`, `useEventCalendars`, `useTheme`, `usePromise`, `useFetch`
-- `openURL`
+- `openURL`, `connectTCP`
 
 ## Theme, Preferences, And Host Data
 
@@ -111,12 +111,14 @@ Use the host data APIs in four patterns:
 - `useAudio()` for host-backed bundled audio playback
 - `useMedia()` for host-backed now-playing state and transport controls
 - `useEvents(query)` and `useEventCalendars()` for EventKit-backed calendar data
+- `connectTCP(options)` for host-mediated TLS TCP streams
 - `usePromise()` only for advanced custom async flows
 
 `useCameras()` follows the shared resource shape: `items`, `value`, `setValue`, `isLoading`, `isPending`, `error`, `refresh`.
 `useAudio()` follows the same pattern and returns `playbackState`, `players`, `isLoading`, `isPending`, `error`, `refresh`, plus `play()`, `pause()`, `togglePlayPause()`, `stop()`, `setVolume()`, `pauseAll()`, `resumeAll()`, and `stopAll()`. Audio sources must be widget-relative bundled assets such as `assets/rain.wav`.
 `useMedia()` follows the same pattern and returns media state plus `play()`, `pause()`, `togglePlayPause()`, `nextTrack()`, `previousTrack()`, and `openSourceApp()`. Media updates are pushed from the host, action methods send transport commands without locally overwriting state, and `refresh()` is available for manual re-fetches when a widget wants an explicit sync point.
 `useEvents(query)` returns a query-scoped event snapshot with `authorizationStatus`, `accessLevel`, `items`, `isLoading`, `isPending`, `error`, `refresh`, `requestAccess()`, `openEvent()`, and `openSourceApp()`. `useEventCalendars()` returns the same shared status fields plus normalized calendar metadata for building filters and legends. Both refetch when the host invalidates calendar data.
+`connectTCP({ host, port, serverName, timeoutMs })` opens a TLS-wrapped TCP connection for protocol clients such as IMAP. It returns a socket with `write(body)`, `read({ maxBytes, timeoutMs, signal })`, and `close()`.
 
 ```tsx
 import { Text, useAudio, useCameras, useMedia, usePreference } from "@skylane/api";

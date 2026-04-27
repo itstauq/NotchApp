@@ -80,6 +80,7 @@ function usePromise(factory, deps = []) {
   React.useEffect(() => {
     return () => {
       controllerRef.current?.abort();
+      depsRef.current = undefined;
     };
   }, []);
 

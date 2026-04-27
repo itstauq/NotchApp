@@ -22,6 +22,11 @@
     "minSpan": 3,
     "maxSpan": 9,
     "entry": "src/index.tsx",
+    "capabilities": {
+      "camera": {
+        "purpose": "Show a preview from the selected camera."
+      }
+    },
     "preferences": [
       {
         "name": "cameraDeviceId",

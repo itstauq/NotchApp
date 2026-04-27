@@ -11,6 +11,7 @@ const { useEvents } = require("./hooks/useEvents");
 const { useEventCalendars } = require("./hooks/useEventCalendars");
 const { openURL } = require("./functions/openURL");
 const { scheduleNotification, cancelNotification } = require("./functions/notifications");
+const { connectTCP } = require("./functions/tcp");
 const { LocalStorage } = require("./runtime");
 
 const OVERLAY_SLOT_TYPE = "__skylane_overlay";
@@ -1174,6 +1175,7 @@ module.exports = {
   useFetch,
   useTheme,
   openURL,
+  connectTCP,
   scheduleNotification,
   cancelNotification,
 };

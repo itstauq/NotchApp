@@ -106,7 +106,7 @@ export function createRuntimeFetch({ callRpc, createRequestId }) {
       throw createAbortError();
     }
 
-    const rpcPromise = callRpc("network.fetch", {
+    const rpcPromise = callRpc("network.http", {
       requestId,
       url: resolveUrl(input),
       method,

@@ -16,15 +16,21 @@
   "skylane": {
     "id": "com.skylaneapp.calendar",
     "title": "Calendar",
-    "description": "Today's upcoming schedule",
+    "description": "Upcoming schedule",
     "icon": "calendar",
     "theme": "blue",
     "minSpan": 3,
     "maxSpan": 9,
     "entry": "src/index.tsx",
     "capabilities": {
-      "events": {
+      "calendar": {
+        "purpose": "Show today's upcoming calendar events.",
         "access": "fullAccess"
+      },
+      "browser": {
+        "openExternalURLs": {
+          "purpose": "Open meeting links from calendar events."
+        }
       }
     }
   }

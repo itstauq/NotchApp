@@ -17,7 +17,7 @@ These are some of the built-in widgets currently planned for v1.
 
 - **Home:** Quick Capture, Camera Preview, Music
 - **Focus:** Pomodoro, Notes, Ambient Sounds
-- **Plan:** Linear, Calendar, Gmail
+- **Plan:** Linear, Calendar, Email
 
 ![mock-widgets](https://github.com/user-attachments/assets/43825158-46d0-4da9-ab8f-b1b5ab1bd501)
 

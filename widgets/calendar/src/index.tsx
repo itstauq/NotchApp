@@ -7,6 +7,7 @@ import {
   CardDescription,
   CardTitle,
   Divider,
+  IconButton,
   Inline,
   Overlay,
   openURL,
@@ -56,11 +57,17 @@ function timePartsForEvent(event) {
   });
   const parts = formatter.formatToParts(date);
   const time = parts
-    .filter((part) => part.type === "hour" || part.type === "minute" || part.type === "literal")
+    .filter(
+      (part) =>
+        part.type === "hour" ||
+        part.type === "minute" ||
+        part.type === "literal",
+    )
     .map((part) => part.value)
     .join("")
     .trim();
-  const meridiem = parts.find((part) => part.type === "dayPeriod")?.value?.toUpperCase() ?? "";
+  const meridiem =
+    parts.find((part) => part.type === "dayPeriod")?.value?.toUpperCase() ?? "";
 
   return { time, meridiem };
 }
@@ -145,12 +152,7 @@ function PermissionState({ textColor, mutedColor, onRequestAccess }) {
       alignment="center"
       frame={{ maxWidth: Infinity, maxHeight: Infinity }}
     >
-      <Text
-        size={12}
-        weight="semibold"
-        alignment="center"
-        color={textColor}
-      >
+      <Text size={12} weight="semibold" alignment="center" color={textColor}>
         Connect Calendar
       </Text>
       <Text
@@ -177,12 +179,7 @@ function MessageState({ title, body, textColor, mutedColor }) {
       alignment="center"
       frame={{ maxWidth: Infinity, maxHeight: Infinity }}
     >
-      <Text
-        size={12}
-        weight="semibold"
-        alignment="center"
-        color={textColor}
-      >
+      <Text size={12} weight="semibold" alignment="center" color={textColor}>
         {title}
       </Text>
       <Text
@@ -205,7 +202,7 @@ function EventDetailsDialog({ event, colors, onClose, onJoin }) {
       <Card
         variant="accent"
         cornerRadius={18}
-        fill="#12161DEB"
+        fill={colors.card}
         strokeColor={withAlpha(colors.title, "1A")}
         frame={{ maxWidth: 228 }}
       >
@@ -218,7 +215,11 @@ function EventDetailsDialog({ event, colors, onClose, onJoin }) {
             alignment="leading"
             padding={{ top: 14, leading: 14, trailing: 14, bottom: 14 }}
           >
-            <Stack spacing={5} alignment="leading" frame={{ maxWidth: Infinity }}>
+            <Stack
+              spacing={5}
+              alignment="leading"
+              frame={{ maxWidth: Infinity }}
+            >
               <CardTitle lineClamp={2}>{event.title}</CardTitle>
               <CardDescription color={colors.meta}>
                 {detailTimeText(event)}
@@ -226,7 +227,11 @@ function EventDetailsDialog({ event, colors, onClose, onJoin }) {
             </Stack>
 
             {event.location ? (
-              <Stack spacing={3} alignment="leading" frame={{ maxWidth: Infinity }}>
+              <Stack
+                spacing={3}
+                alignment="leading"
+                frame={{ maxWidth: Infinity }}
+              >
                 <Text size={10} weight="bold" color={colors.time}>
                   Location
                 </Text>
@@ -237,7 +242,11 @@ function EventDetailsDialog({ event, colors, onClose, onJoin }) {
             ) : null}
 
             {event.notes ? (
-              <Stack spacing={3} alignment="leading" frame={{ maxWidth: Infinity }}>
+              <Stack
+                spacing={3}
+                alignment="leading"
+                frame={{ maxWidth: Infinity }}
+              >
                 <Text size={10} weight="bold" color={colors.time}>
                   Notes
                 </Text>
@@ -247,7 +256,11 @@ function EventDetailsDialog({ event, colors, onClose, onJoin }) {
               </Stack>
             ) : null}
 
-            <Inline alignment="center" spacing={8} frame={{ maxWidth: Infinity }}>
+            <Inline
+              alignment="center"
+              spacing={8}
+              frame={{ maxWidth: Infinity }}
+            >
               <Spacer />
               {joinURL ? (
                 <Button
@@ -266,6 +279,18 @@ function EventDetailsDialog({ event, colors, onClose, onJoin }) {
             </Inline>
           </CardContent>
         </ScrollView>
+        <Overlay placement="top-end" inset="sm">
+          <IconButton
+            symbol="xmark"
+            variant="subtle"
+            size="small"
+            iconSize={9}
+            width={22}
+            height={22}
+            color={colors.close}
+            onClick={onClose}
+          />
+        </Overlay>
       </Card>
     </Overlay>
   );
@@ -276,17 +301,18 @@ function ScheduleRow({ event, metrics, colors, onOpenEvent }) {
   const joinURL = joinableURLForEvent(event);
 
   return (
-    <Stack
-      onPress={() => onOpenEvent(event)}
-      frame={{ maxWidth: Infinity }}
-    >
+    <Stack onPress={() => onOpenEvent(event)} frame={{ maxWidth: Infinity }}>
       <Inline
         alignment="start"
         spacing={metrics.rowGap}
         padding={{ top: metrics.rowPaddingY, bottom: metrics.rowPaddingY }}
         frame={{ maxWidth: Infinity }}
       >
-        <Stack spacing={2} alignment="trailing" frame={{ width: metrics.timeWidth }}>
+        <Stack
+          spacing={2}
+          alignment="trailing"
+          frame={{ width: metrics.timeWidth }}
+        >
           <Text
             size={metrics.timeSize}
             weight="bold"
@@ -384,11 +410,13 @@ export default function Widget({ environment }) {
     [calendarById, events.items],
   );
   const colors = {
+    card: theme.colors.card,
     time: withAlpha(theme.colors.foreground, "D6"),
     meridiem: withAlpha(theme.colors.foreground, "57"),
     title: withAlpha(theme.colors.foreground, "E6"),
     meta: withAlpha(theme.colors.foreground, "66"),
     divider: withAlpha(theme.colors.foreground, "14"),
+    close: withAlpha(theme.colors.foreground, "A6"),
   };
   const handleOpenEvent = React.useCallback((event) => {
     setSelectedEventID(event.id);
@@ -406,8 +434,8 @@ export default function Widget({ environment }) {
 
   let content;
   if (
-    events.authorizationStatus === "notDetermined"
-    || events.authorizationStatus === "writeOnly"
+    events.authorizationStatus === "notDetermined" ||
+    events.authorizationStatus === "writeOnly"
   ) {
     content = (
       <PermissionState
@@ -417,8 +445,8 @@ export default function Widget({ environment }) {
       />
     );
   } else if (
-    events.authorizationStatus === "denied"
-    || events.authorizationStatus === "restricted"
+    events.authorizationStatus === "denied" ||
+    events.authorizationStatus === "restricted"
   ) {
     content = (
       <MessageState
@@ -474,7 +502,10 @@ export default function Widget({ environment }) {
 
   return (
     <Section
-      padding={{ top: metrics.sectionPaddingY, bottom: metrics.sectionPaddingY }}
+      padding={{
+        top: metrics.sectionPaddingY,
+        bottom: metrics.sectionPaddingY,
+      }}
       frame={{ maxWidth: Infinity, maxHeight: Infinity }}
     >
       {content}

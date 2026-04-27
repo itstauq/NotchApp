@@ -163,7 +163,7 @@ Commits `de68196`, `8b64713`, and `88688469eb510fa87ff8b238c2babe349fa84595` con
 | Music | `#B08AFA` | `indigo` |
 | Notes | `#8AC2FA` | `cyan` |
 | Linear | `#B894FA` | `violet` |
-| Gmail | `#F5757A` | `pink` |
+| Email | `#F5757A` | `pink` |
 
 ## Implemented Theme Families
 

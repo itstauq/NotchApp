@@ -2945,7 +2945,7 @@ private struct RuntimeV2InputNodeView: View {
         .frame(height: CGFloat(theme.controls.inputHeight))
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(RuntimeV2StyleResolver.color(hex: theme.colors.card) ?? .white.opacity(0.07))
+                .fill(RuntimeV2StyleResolver.color(hex: theme.colors.secondary) ?? .white.opacity(0.07))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)

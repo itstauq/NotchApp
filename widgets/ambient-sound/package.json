@@ -23,7 +23,9 @@
     "maxSpan": 4,
     "entry": "src/index.tsx",
     "capabilities": {
-      "audio": {}
+      "audio": {
+        "purpose": "Play bundled ambient sound loops."
+      }
     }
   }
 }

@@ -23,7 +23,9 @@
     "maxSpan": 6,
     "entry": "src/index.tsx",
     "capabilities": {
-      "notifications": {}
+      "notifications": {
+        "purpose": "Notify you when a focus or break session completes."
+      }
     },
     "preferences": [
       {

@@ -3,6 +3,8 @@ import AppKit
 import Combine
 import EventKit
 import Foundation
+import Network
+import Security
 import UserNotifications
 
 private let cameraDevicePreferenceName = "cameraDeviceId"
@@ -41,6 +43,36 @@ struct RuntimeCancelNotificationParams: Decodable {
 
 struct RuntimeBrowserOpenParams: Decodable {
     var url: String
+}
+
+struct RuntimeTCPConnectParams: Decodable {
+    var connectionId: String
+    var host: String
+    var port: Int
+    var serverName: String?
+    var timeoutMs: Double?
+}
+
+struct RuntimeTCPWriteParams: Decodable {
+    var connectionId: String
+    var body: String
+    var bodyEncoding: String
+}
+
+struct RuntimeTCPReadParams: Decodable {
+    var connectionId: String
+    var requestId: String
+    var maxBytes: Int?
+    var timeoutMs: Double?
+}
+
+struct RuntimeTCPCloseParams: Decodable {
+    var connectionId: String
+}
+
+struct RuntimeTCPReadResponsePayload: Codable, Equatable {
+    var body: String
+    var bodyEncoding: String
 }
 
 struct RuntimeAudioPlayParams: Decodable {
@@ -136,6 +168,12 @@ struct WidgetHostNetworkContext {
     var widgetID: String
     var instanceID: String
     var kind: WidgetHostNetworkRequestKind
+}
+
+struct WidgetHostTCPContext {
+    var widgetID: String
+    var instanceID: String
+    var sessionID: String
 }
 
 private enum WidgetHostNetworkPolicyError: Error {
@@ -406,6 +444,399 @@ final class WidgetHostNetworkService: WidgetHostNetworkHandling {
             headers: normalizedHeaders,
             body: data.isEmpty ? nil : data.base64EncodedString(),
             bodyEncoding: "base64"
+        )
+    }
+}
+
+@MainActor
+protocol WidgetHostTCPHandling {
+    func connect(_ params: RuntimeTCPConnectParams, context: WidgetHostTCPContext) async throws
+    func write(_ params: RuntimeTCPWriteParams, context: WidgetHostTCPContext) async throws
+    func read(_ params: RuntimeTCPReadParams, context: WidgetHostTCPContext) async throws -> RuntimeTCPReadResponsePayload?
+    func close(_ params: RuntimeTCPCloseParams, context: WidgetHostTCPContext) throws
+    func cancel(_ params: RuntimeCancelRequestParams)
+    func removeInstance(_ instanceID: String)
+}
+
+@MainActor
+final class WidgetHostTCPService: WidgetHostTCPHandling {
+    private final class PendingRead {
+        let requestId: String
+        let maxBytes: Int
+        var timeoutTask: Task<Void, Never>?
+        var continuation: CheckedContinuation<RuntimeTCPReadResponsePayload?, Error>?
+
+        init(
+            requestId: String,
+            maxBytes: Int,
+            continuation: CheckedContinuation<RuntimeTCPReadResponsePayload?, Error>
+        ) {
+            self.requestId = requestId
+            self.maxBytes = maxBytes
+            self.continuation = continuation
+        }
+    }
+
+    private final class ConnectionState {
+        let connectionId: String
+        let widgetID: String
+        let instanceID: String
+        let sessionID: String
+        let connection: NWConnection
+        var buffer = Data()
+        var isClosed = false
+        var pendingRead: PendingRead?
+        var connectContinuation: CheckedContinuation<Void, Error>?
+        var connectTimeoutTask: Task<Void, Never>?
+        var didStartReceive = false
+
+        init(connectionId: String, context: WidgetHostTCPContext, connection: NWConnection) {
+            self.connectionId = connectionId
+            self.widgetID = context.widgetID
+            self.instanceID = context.instanceID
+            self.sessionID = context.sessionID
+            self.connection = connection
+        }
+    }
+
+    private let queue = DispatchQueue(label: "com.skylaneapp.widget-host-tcp")
+    private var connections: [String: ConnectionState] = [:]
+
+    func connect(_ params: RuntimeTCPConnectParams, context: WidgetHostTCPContext) async throws {
+        let connectionId = try validatedID(params.connectionId, fieldName: "connectionId")
+        let host = try validatedHost(params.host)
+        let port = try validatedPort(params.port)
+        let serverName = (params.serverName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+            ? params.serverName!.trimmingCharacters(in: .whitespacesAndNewlines)
+            : host
+
+        if connections[connectionId] != nil {
+            throw RuntimeTransportRPCError(
+                code: -32040,
+                message: "TCP connection '\(connectionId)' already exists.",
+                data: nil
+            )
+        }
+
+        let tlsOptions = NWProtocolTLS.Options()
+        sec_protocol_options_set_tls_server_name(tlsOptions.securityProtocolOptions, serverName)
+        let parameters = NWParameters(tls: tlsOptions)
+        let endpoint = NWEndpoint.hostPort(host: NWEndpoint.Host(host), port: port)
+        let connection = NWConnection(to: endpoint, using: parameters)
+        let state = ConnectionState(connectionId: connectionId, context: context, connection: connection)
+        connections[connectionId] = state
+
+        return try await withCheckedThrowingContinuation { continuation in
+            state.connectContinuation = continuation
+            state.connectTimeoutTask = timeoutTask(
+                after: timeoutSeconds(from: params.timeoutMs),
+                message: "TCP connection timed out."
+            ) { [weak self, weak state] error in
+                guard let self, let state else { return }
+                self.finishConnect(state, result: .failure(error))
+                self.closeState(state)
+            }
+
+            connection.stateUpdateHandler = { [weak self, weak state] newState in
+                Task { @MainActor [weak self, weak state] in
+                    guard let self, let state else { return }
+                    self.handleConnectionState(newState, for: state)
+                }
+            }
+            connection.start(queue: queue)
+        }
+    }
+
+    func write(_ params: RuntimeTCPWriteParams, context: WidgetHostTCPContext) async throws {
+        let state = try state(for: params.connectionId, context: context)
+        guard !state.isClosed else {
+            throw closedError(params.connectionId)
+        }
+        guard params.bodyEncoding == "base64", let data = Data(base64Encoded: params.body) else {
+            throw RuntimeTransportRPCError(
+                code: -32602,
+                message: "TCP write body must be base64 encoded.",
+                data: nil
+            )
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            state.connection.send(content: data, completion: .contentProcessed { error in
+                Task { @MainActor in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+            })
+        }
+    }
+
+    func read(_ params: RuntimeTCPReadParams, context: WidgetHostTCPContext) async throws -> RuntimeTCPReadResponsePayload? {
+        let state = try state(for: params.connectionId, context: context)
+        let requestId = try validatedID(params.requestId, fieldName: "requestId")
+        let maxBytes = max(1, min(params.maxBytes ?? 65_536, 262_144))
+
+        if !state.buffer.isEmpty {
+            return drainBufferedPayload(from: state, maxBytes: maxBytes)
+        }
+
+        if state.isClosed {
+            return nil
+        }
+
+        if state.pendingRead != nil {
+            throw RuntimeTransportRPCError(
+                code: -32043,
+                message: "TCP connection '\(params.connectionId)' already has a pending read.",
+                data: nil
+            )
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let pending = PendingRead(
+                requestId: requestId,
+                maxBytes: maxBytes,
+                continuation: continuation
+            )
+            pending.timeoutTask = timeoutTask(
+                after: timeoutSeconds(from: params.timeoutMs),
+                message: "TCP read timed out."
+            ) { [weak self, weak state] error in
+                guard let self, let state, state.pendingRead === pending else { return }
+                self.finishPendingRead(for: state, result: .failure(error))
+            }
+            state.pendingRead = pending
+        }
+    }
+
+    func close(_ params: RuntimeTCPCloseParams, context: WidgetHostTCPContext) throws {
+        let state = try state(for: params.connectionId, context: context)
+        closeState(state)
+    }
+
+    func cancel(_ params: RuntimeCancelRequestParams) {
+        for state in connections.values {
+            guard state.pendingRead?.requestId == params.requestId else { continue }
+            finishPendingRead(
+                for: state,
+                result: .failure(URLError(.cancelled))
+            )
+            return
+        }
+    }
+
+    func removeInstance(_ instanceID: String) {
+        for state in connections.values where state.instanceID == instanceID {
+            closeState(state)
+        }
+    }
+
+    private func handleConnectionState(_ newState: NWConnection.State, for state: ConnectionState) {
+        switch newState {
+        case .ready:
+            finishConnect(state, result: .success(()))
+            startReceiveLoopIfNeeded(for: state)
+        case .failed(let error):
+            finishConnect(state, result: .failure(error))
+            finishPendingRead(for: state, result: .failure(error))
+            closeState(state)
+        case .cancelled:
+            state.isClosed = true
+            finishConnect(state, result: .failure(URLError(.cancelled)))
+            finishPendingRead(for: state, result: .success(nil))
+            connections.removeValue(forKey: state.connectionId)
+        default:
+            break
+        }
+    }
+
+    private func startReceiveLoopIfNeeded(for state: ConnectionState) {
+        guard !state.didStartReceive else { return }
+        state.didStartReceive = true
+        receiveNextChunk(for: state)
+    }
+
+    private func receiveNextChunk(for state: ConnectionState) {
+        guard !state.isClosed else { return }
+
+        state.connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self, weak state] data, _, isComplete, error in
+            Task { @MainActor [weak self, weak state] in
+                guard let self, let state else { return }
+
+                if let data, !data.isEmpty {
+                    state.buffer.append(data)
+                    self.satisfyPendingReadIfPossible(for: state)
+                }
+
+                if let error {
+                    self.finishPendingRead(for: state, result: .failure(error))
+                    self.closeState(state)
+                    return
+                }
+
+                if isComplete {
+                    state.isClosed = true
+                    self.finishPendingRead(for: state, result: .success(nil))
+                    return
+                }
+
+                self.receiveNextChunk(for: state)
+            }
+        }
+    }
+
+    private func satisfyPendingReadIfPossible(for state: ConnectionState) {
+        guard let pending = state.pendingRead, !state.buffer.isEmpty else { return }
+        finishPendingRead(
+            for: state,
+            result: .success(drainBufferedPayload(from: state, maxBytes: pending.maxBytes))
+        )
+    }
+
+    private func finishConnect(_ state: ConnectionState, result: Result<Void, Error>) {
+        guard let continuation = state.connectContinuation else { return }
+        state.connectContinuation = nil
+        state.connectTimeoutTask?.cancel()
+        state.connectTimeoutTask = nil
+
+        switch result {
+        case .success:
+            continuation.resume()
+        case .failure(let error):
+            continuation.resume(throwing: error)
+        }
+    }
+
+    private func finishPendingRead(
+        for state: ConnectionState,
+        result: Result<RuntimeTCPReadResponsePayload?, Error>
+    ) {
+        guard let pending = state.pendingRead else { return }
+        state.pendingRead = nil
+        pending.timeoutTask?.cancel()
+
+        guard let continuation = pending.continuation else { return }
+        pending.continuation = nil
+
+        switch result {
+        case .success(let payload):
+            continuation.resume(returning: payload)
+        case .failure(let error):
+            continuation.resume(throwing: error)
+        }
+    }
+
+    private func closeState(_ state: ConnectionState) {
+        state.isClosed = true
+        state.connectTimeoutTask?.cancel()
+        finishConnect(state, result: .failure(URLError(.cancelled)))
+        finishPendingRead(for: state, result: .success(nil))
+        state.connection.cancel()
+        connections.removeValue(forKey: state.connectionId)
+    }
+
+    private func state(for connectionId: String, context: WidgetHostTCPContext) throws -> ConnectionState {
+        let validatedConnectionId = try validatedID(connectionId, fieldName: "connectionId")
+        guard let state = connections[validatedConnectionId] else {
+            throw RuntimeTransportRPCError(
+                code: -32040,
+                message: "Unknown TCP connection '\(validatedConnectionId)'.",
+                data: nil
+            )
+        }
+
+        guard state.widgetID == context.widgetID,
+              state.instanceID == context.instanceID,
+              state.sessionID == context.sessionID else {
+            throw RuntimeTransportRPCError(
+                code: -32004,
+                message: "Session mismatch for TCP connection '\(validatedConnectionId)'.",
+                data: nil
+            )
+        }
+
+        return state
+    }
+
+    private func drainBufferedPayload(from state: ConnectionState, maxBytes: Int) -> RuntimeTCPReadResponsePayload {
+        let byteCount = min(maxBytes, state.buffer.count)
+        let data = state.buffer.prefix(byteCount)
+        state.buffer.removeFirst(byteCount)
+        return RuntimeTCPReadResponsePayload(
+            body: Data(data).base64EncodedString(),
+            bodyEncoding: "base64"
+        )
+    }
+
+    private func timeoutTask(
+        after seconds: TimeInterval,
+        message: String,
+        operation: @escaping (RuntimeTransportRPCError) -> Void
+    ) -> Task<Void, Never> {
+        Task { @MainActor in
+            let nanoseconds = UInt64(seconds * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: nanoseconds)
+            guard !Task.isCancelled else { return }
+            operation(
+                RuntimeTransportRPCError(
+                    code: -32041,
+                    message: message,
+                    data: nil
+                )
+            )
+        }
+    }
+
+    private func timeoutSeconds(from milliseconds: Double?) -> TimeInterval {
+        guard let milliseconds, milliseconds.isFinite, milliseconds > 0 else {
+            return 30
+        }
+        return max(0.001, milliseconds / 1000)
+    }
+
+    private func validatedID(_ value: String, fieldName: String) throws -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw RuntimeTransportRPCError(
+                code: -32602,
+                message: "TCP \(fieldName) must be a non-empty string.",
+                data: nil
+            )
+        }
+        return trimmed
+    }
+
+    private func validatedHost(_ value: String) throws -> String {
+        let host = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty else {
+            throw RuntimeTransportRPCError(
+                code: -32602,
+                message: "TCP host must be a non-empty string.",
+                data: nil
+            )
+        }
+        return host
+    }
+
+    private func validatedPort(_ value: Int) throws -> NWEndpoint.Port {
+        guard (1...65_535).contains(value),
+              let port = NWEndpoint.Port(rawValue: UInt16(value)) else {
+            throw RuntimeTransportRPCError(
+                code: -32602,
+                message: "TCP port must be between 1 and 65535.",
+                data: nil
+            )
+        }
+        return port
+    }
+
+    private func closedError(_ connectionId: String) -> RuntimeTransportRPCError {
+        RuntimeTransportRPCError(
+            code: -32042,
+            message: "TCP connection '\(connectionId)' is closed.",
+            data: nil
         )
     }
 }
@@ -3193,6 +3624,7 @@ final class WidgetHostAPI {
     private let sessionManager: WidgetSessionManager
     private let storage: WidgetHostLocalStorageHandling
     private let network: WidgetHostNetworkHandling
+    private let tcp: WidgetHostTCPHandling
     private let media: WidgetHostMediaHandling
     private let audio: WidgetHostAudioHandling
     private let events: WidgetHostEventsHandling
@@ -3207,6 +3639,7 @@ final class WidgetHostAPI {
         sessionManager: WidgetSessionManager,
         storage: WidgetHostLocalStorageHandling,
         network: WidgetHostNetworkHandling,
+        tcp: WidgetHostTCPHandling? = nil,
         media: WidgetHostMediaHandling? = nil,
         audio: WidgetHostAudioHandling? = nil,
         events: WidgetHostEventsHandling? = nil,
@@ -3221,6 +3654,7 @@ final class WidgetHostAPI {
         self.sessionManager = sessionManager
         self.storage = storage
         self.network = network
+        self.tcp = tcp ?? WidgetHostTCPService()
         self.media = resolvedMedia
         self.audio = resolvedAudio
         self.events = resolvedEvents
@@ -3281,6 +3715,7 @@ final class WidgetHostAPI {
                 widgetDefinition: widgetDefinition,
                 widgetID: widgetID,
                 instanceID: instanceID,
+                sessionID: rpcRequest.sessionId,
                 method: rpcRequest.method,
                 params: rpcRequest.params
             )
@@ -3307,6 +3742,7 @@ final class WidgetHostAPI {
         widgetDefinition: WidgetDefinition?,
         widgetID: String,
         instanceID: UUID,
+        sessionID: String,
         method: String,
         params: RuntimeJSONValue?
     ) async throws -> RuntimeJSONValue {
@@ -3318,7 +3754,11 @@ final class WidgetHostAPI {
                 method: method,
                 params: params
             )
-        case "network.fetch":
+        case "network.http":
+            try requireNetworkHTTPCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
             let fetchParams = try decode(params, as: RuntimeFetchRequestParams.self)
             let context = WidgetHostNetworkContext(
                 widgetID: widgetID,
@@ -3329,8 +3769,76 @@ final class WidgetHostAPI {
         case "request.cancel":
             let cancelParams = try decode(params, as: RuntimeCancelRequestParams.self)
             network.cancel(cancelParams)
+            tcp.cancel(cancelParams)
+            return .null
+        case "network.tcp.connect":
+            try requireNetworkTCPCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            let tcpParams = try decode(params, as: RuntimeTCPConnectParams.self)
+            try await tcp.connect(
+                tcpParams,
+                context: WidgetHostTCPContext(
+                    widgetID: widgetID,
+                    instanceID: instanceID.uuidString,
+                    sessionID: sessionID
+                )
+            )
+            return .null
+        case "network.tcp.write":
+            try requireNetworkTCPCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            let tcpParams = try decode(params, as: RuntimeTCPWriteParams.self)
+            try await tcp.write(
+                tcpParams,
+                context: WidgetHostTCPContext(
+                    widgetID: widgetID,
+                    instanceID: instanceID.uuidString,
+                    sessionID: sessionID
+                )
+            )
+            return .null
+        case "network.tcp.read":
+            try requireNetworkTCPCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            let tcpParams = try decode(params, as: RuntimeTCPReadParams.self)
+            let response = try await tcp.read(
+                tcpParams,
+                context: WidgetHostTCPContext(
+                    widgetID: widgetID,
+                    instanceID: instanceID.uuidString,
+                    sessionID: sessionID
+                )
+            )
+            if let response {
+                return try encodeRuntimeJSONValue(response)
+            }
+            return .null
+        case "network.tcp.close":
+            try requireNetworkTCPCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
+            let tcpParams = try decode(params, as: RuntimeTCPCloseParams.self)
+            try tcp.close(
+                tcpParams,
+                context: WidgetHostTCPContext(
+                    widgetID: widgetID,
+                    instanceID: instanceID.uuidString,
+                    sessionID: sessionID
+                )
+            )
             return .null
         case "browser.open":
+            try requireBrowserOpenExternalURLsCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
             let openParams = try decode(params, as: RuntimeBrowserOpenParams.self)
             let context = WidgetHostNetworkContext(
                 widgetID: widgetID,
@@ -3353,6 +3861,10 @@ final class WidgetHostAPI {
             )
             return .null
         case "camera.listDevices":
+            try requireCameraCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
             let selectedCameraID = resolvedPreferenceValues(
                 widgetID: widgetID,
                 instanceID: instanceID.uuidString
@@ -3361,6 +3873,10 @@ final class WidgetHostAPI {
                 WidgetCameraRegistry.shared.availableDevices(selectedDeviceID: selectedCameraID)
             )
         case "camera.selectDevice":
+            try requireCameraCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
             let cameraParams = try decode(params, as: RuntimeCameraSelectDeviceParams.self)
             try storage.setPreferenceValue(
                 widgetID: widgetID,
@@ -3374,23 +3890,51 @@ final class WidgetHostAPI {
             )
             return .null
         case "media.getState":
+            try requireMediaCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
             return try encodeRuntimeJSONValue(try await media.getState())
         case "media.play":
+            try requireMediaCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
             try await media.play()
             return .null
         case "media.pause":
+            try requireMediaCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
             try await media.pause()
             return .null
         case "media.togglePlayPause":
+            try requireMediaCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
             try await media.togglePlayPause()
             return .null
         case "media.nextTrack":
+            try requireMediaCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
             try await media.nextTrack()
             return .null
         case "media.previousTrack":
+            try requireMediaCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
             try await media.previousTrack()
             return .null
         case "media.openSourceApp":
+            try requireMediaCapability(
+                for: widgetID,
+                widgetDefinition: widgetDefinition
+            )
             try await media.openSourceApp()
             return .null
         case "audio.getState":
@@ -3466,7 +4010,7 @@ final class WidgetHostAPI {
             audio.stopAll(instanceID: instanceID)
             return .null
         case "events.getSnapshot":
-            try requireEventsCapability(
+            try requireCalendarCapability(
                 for: widgetID,
                 widgetDefinition: widgetDefinition
             )
@@ -3479,7 +4023,7 @@ final class WidgetHostAPI {
                 )
             )
         case "events.listCalendars":
-            try requireEventsCapability(
+            try requireCalendarCapability(
                 for: widgetID,
                 widgetDefinition: widgetDefinition
             )
@@ -3488,7 +4032,7 @@ final class WidgetHostAPI {
                 events.listCalendars(capabilityAccessLevel: capabilityAccessLevel)
             )
         case "events.requestAccess":
-            try requireEventsCapability(
+            try requireCalendarCapability(
                 for: widgetID,
                 widgetDefinition: widgetDefinition
             )
@@ -3502,7 +4046,7 @@ final class WidgetHostAPI {
                 )
             )
         case "events.openEvent":
-            try requireEventsCapability(
+            try requireCalendarCapability(
                 for: widgetID,
                 widgetDefinition: widgetDefinition
             )
@@ -3510,7 +4054,7 @@ final class WidgetHostAPI {
             try await events.openEvent(eventParams)
             return .null
         case "events.openSourceApp":
-            try requireEventsCapability(
+            try requireCalendarCapability(
                 for: widgetID,
                 widgetDefinition: widgetDefinition
             )
@@ -3661,17 +4205,92 @@ final class WidgetHostAPI {
         )
     }
 
-    private func requireEventsCapability(
+    private func requireMediaCapability(
         for widgetID: String,
         widgetDefinition: WidgetDefinition?
     ) throws {
-        if widgetDefinition?.supportsEvents == true {
+        if widgetDefinition?.supportsMedia == true {
             return
         }
 
         throw RuntimeTransportRPCError(
             code: -32030,
-            message: "Widget '\(widgetID)' does not declare events support.",
+            message: "Widget '\(widgetID)' does not declare media support.",
+            data: nil
+        )
+    }
+
+    private func requireCameraCapability(
+        for widgetID: String,
+        widgetDefinition: WidgetDefinition?
+    ) throws {
+        if widgetDefinition?.supportsCamera == true {
+            return
+        }
+
+        throw RuntimeTransportRPCError(
+            code: -32030,
+            message: "Widget '\(widgetID)' does not declare camera support.",
+            data: nil
+        )
+    }
+
+    private func requireCalendarCapability(
+        for widgetID: String,
+        widgetDefinition: WidgetDefinition?
+    ) throws {
+        if widgetDefinition?.supportsCalendar == true {
+            return
+        }
+
+        throw RuntimeTransportRPCError(
+            code: -32030,
+            message: "Widget '\(widgetID)' does not declare calendar support.",
+            data: nil
+        )
+    }
+
+    private func requireNetworkHTTPCapability(
+        for widgetID: String,
+        widgetDefinition: WidgetDefinition?
+    ) throws {
+        if widgetDefinition?.supportsNetworkHTTP == true {
+            return
+        }
+
+        throw RuntimeTransportRPCError(
+            code: -32030,
+            message: "Widget '\(widgetID)' does not declare network HTTP support.",
+            data: nil
+        )
+    }
+
+    private func requireNetworkTCPCapability(
+        for widgetID: String,
+        widgetDefinition: WidgetDefinition?
+    ) throws {
+        if widgetDefinition?.supportsNetworkTCP == true {
+            return
+        }
+
+        throw RuntimeTransportRPCError(
+            code: -32030,
+            message: "Widget '\(widgetID)' does not declare network TCP support.",
+            data: nil
+        )
+    }
+
+    private func requireBrowserOpenExternalURLsCapability(
+        for widgetID: String,
+        widgetDefinition: WidgetDefinition?
+    ) throws {
+        if widgetDefinition?.supportsBrowserOpenExternalURLs == true {
+            return
+        }
+
+        throw RuntimeTransportRPCError(
+            code: -32030,
+            message: "Widget '\(widgetID)' does not declare external URL opening support.",
             data: nil
         )
     }
@@ -3733,5 +4352,6 @@ final class WidgetHostAPI {
 
     func removeInstance(_ instanceID: UUID) {
         audio.removeAllPlayers(instanceID: instanceID)
+        tcp.removeInstance(instanceID.uuidString)
     }
 }

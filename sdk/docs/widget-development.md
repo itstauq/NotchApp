@@ -361,7 +361,7 @@ Events are host-managed and query-based, not widget-managed. The widget requests
 - invalidating stale data when the system calendar database changes
 - opening Calendar or jumping to the relevant event time
 
-To opt in, declare events support in the manifest:
+To opt in, declare calendar support in the manifest:
 
 ```json
 {
@@ -373,7 +373,8 @@ To opt in, declare events support in the manifest:
     "maxSpan": 6,
     "entry": "src/index.tsx",
     "capabilities": {
-      "events": {
+      "calendar": {
+        "purpose": "Show upcoming calendar events.",
         "access": "fullAccess"
       }
     }
@@ -381,7 +382,7 @@ To opt in, declare events support in the manifest:
 }
 ```
 
-`capabilities.events` is optional. If it is missing, the widget cannot call the host events RPCs.
+`capabilities.calendar` is optional. If it is missing, the widget cannot call the host calendar event RPCs.
 
 In widget code, use `useEvents()` and `useEventCalendars()`:
 
@@ -531,8 +532,13 @@ Optional fields:
 `capabilities` is where a widget declares access to host-managed APIs. Current capability keys:
 
 - `audio`
+- `media`
 - `notifications`
-- `events`
+- `calendar`
+- `camera`
+- `network.http`
+- `network.tcp`
+- `browser.openExternalURLs`
 
 Example manifest with preferences plus audio and notifications:
 
@@ -561,8 +567,12 @@ Example manifest with preferences plus audio and notifications:
     "maxSpan": 6,
     "entry": "src/index.tsx",
     "capabilities": {
-      "audio": {},
-      "notifications": {}
+      "audio": {
+        "purpose": "Play bundled completion sounds."
+      },
+      "notifications": {
+        "purpose": "Notify when a focus session completes."
+      }
     },
     "preferences": [
       {
@@ -687,6 +697,7 @@ Other host-backed APIs available through `@skylane/api`:
 - `useEventCalendars()` for calendar metadata and filter UIs
 - `useFetch()` and `usePromise()` for advanced async flows
 - `openURL()` for opening external links
+- `connectTCP()` for TLS-wrapped TCP streams
 
 ## Configure In Skylane
 
