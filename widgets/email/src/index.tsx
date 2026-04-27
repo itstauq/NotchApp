@@ -27,6 +27,7 @@ import {
   fetchIMAPMessageDetail,
   fetchUnreadIMAPMessages,
   markIMAPMessageRead,
+  watchIMAPMailbox,
 } from "./imap-client.mjs";
 
 function withAlpha(color, alpha) {
@@ -40,6 +41,30 @@ function withAlpha(color, alpha) {
   }
 
   return `#${normalized.slice(0, 6)}${alpha}`;
+}
+
+function normalizePreferenceText(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function isAbortError(error) {
+  return error?.name === "AbortError";
+}
+
+function sleep(ms, signal) {
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException("The operation was aborted.", "AbortError"));
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(resolve, ms);
+    const abort = () => {
+      clearTimeout(timeout);
+      reject(new DOMException("The operation was aborted.", "AbortError"));
+    };
+
+    signal?.addEventListener("abort", abort, { once: true });
+  });
 }
 
 function Header({ count, colors, onRefresh }) {
@@ -399,6 +424,71 @@ export default function Widget() {
       }),
     [email, password, host, port, mailbox, selectedUID],
   );
+  React.useEffect(() => {
+    const hasConfiguration = Boolean(
+      normalizePreferenceText(email)
+      && normalizePreferenceText(password)
+      && normalizePreferenceText(host),
+    );
+    if (!hasConfiguration || inbox.isLoading || inbox.error || inbox.data?.needsConfiguration) {
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    let retryDelay = 5000;
+
+    async function runWatcher() {
+      while (!controller.signal.aborted) {
+        try {
+          await watchIMAPMailbox({
+            email,
+            password,
+            host,
+            port,
+            mailbox,
+            connect: connectTCP,
+            signal: controller.signal,
+            onReady() {
+              retryDelay = 5000;
+            },
+            onChange() {
+              inbox.revalidate();
+            },
+          });
+        } catch (error) {
+          if (controller.signal.aborted || isAbortError(error)) {
+            return;
+          }
+
+          try {
+            await sleep(retryDelay, controller.signal);
+          } catch (sleepError) {
+            if (isAbortError(sleepError)) {
+              return;
+            }
+
+            throw sleepError;
+          }
+          retryDelay = Math.min(retryDelay * 2, 60000);
+        }
+      }
+    }
+
+    runWatcher();
+    return () => {
+      controller.abort();
+    };
+  }, [
+    email,
+    password,
+    host,
+    port,
+    mailbox,
+    inbox.data?.needsConfiguration,
+    inbox.error,
+    inbox.isLoading,
+    inbox.revalidate,
+  ]);
   const handleOpenMessage = React.useCallback((message) => {
     setMarkReadError(null);
     setSelectedMessage(message);

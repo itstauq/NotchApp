@@ -14,7 +14,71 @@ import {
   parseFetchResponse,
   parseMessageDetailResponse,
   parseSearchResponse,
+  watchIMAPMailbox,
 } from "../../widgets/email/src/imap-client.mjs";
+
+const encoder = new TextEncoder();
+
+function createAbortError() {
+  const error = new Error("The operation was aborted.");
+  error.name = "AbortError";
+  return error;
+}
+
+function createIMAPSocket(chunks = [], options = {}) {
+  const writes = [];
+  const pendingReads = [];
+
+  function push(chunk) {
+    const pending = pendingReads.shift();
+    if (pending) {
+      pending.resolve(chunk == null ? null : encoder.encode(chunk));
+      return;
+    }
+
+    chunks.push(chunk);
+  }
+
+  return {
+    writes,
+    push,
+    socket: {
+      async write(value) {
+        writes.push(value);
+        options.onWrite?.(value, push);
+      },
+      async read({ signal } = {}) {
+        if (chunks.length > 0) {
+          const next = chunks.shift();
+          return next == null ? null : encoder.encode(next);
+        }
+
+        if (signal?.aborted) {
+          throw createAbortError();
+        }
+
+        return new Promise((resolve, reject) => {
+          const pending = { resolve, reject };
+          pendingReads.push(pending);
+          signal?.addEventListener(
+            "abort",
+            () => {
+              const index = pendingReads.indexOf(pending);
+              if (index >= 0) {
+                pendingReads.splice(index, 1);
+              }
+              reject(createAbortError());
+            },
+            { once: true },
+          );
+        });
+      },
+      async close() {
+        writes.push("CLOSE");
+      },
+    },
+  };
+}
 
 test("Email preview mock mirrors the original Gmail presentation commit", () => {
   assert.equal(EMAIL_PREVIEW_UNREAD_COUNT, 5);
@@ -213,6 +277,149 @@ test("fetchUnreadIMAPMessages does not hang when logout write never completes", 
   assert.ok(Date.now() - startedAt < 1500);
   assert.match(writes[3], /^A0004 LOGOUT\r\n$/);
   assert.equal(writes[4], "CLOSE");
+});
+
+test("watchIMAPMailbox enters IDLE and refreshes when mailbox changes", async () => {
+  const controller = new AbortController();
+  let changes = 0;
+  const { socket, writes } = createIMAPSocket([
+    "* OK Skylane test IMAP ready\r\n",
+    "A0001 OK LOGIN completed\r\n",
+    "* 5 EXISTS\r\nA0002 OK SELECT completed\r\n",
+    "+ idling\r\n",
+    "* 6 EXISTS\r\n",
+  ], {
+    onWrite(value, push) {
+      if (value === "DONE\r\n") {
+        push("A0003 OK IDLE completed\r\n");
+      }
+    },
+  });
+
+  await assert.rejects(
+    watchIMAPMailbox({
+      email: "you@gmail.com",
+      password: "app-password",
+      host: "imap.gmail.com",
+      port: "993",
+      mailbox: "INBOX",
+      connect: async () => socket,
+      signal: controller.signal,
+      onChange() {
+        changes += 1;
+        controller.abort();
+      },
+    }),
+    { name: "AbortError" },
+  );
+
+  assert.equal(changes, 1);
+  assert.match(writes[0], /^A0001 LOGIN "you@gmail.com" "app-password"\r\n$/);
+  assert.match(writes[1], /^A0002 SELECT "INBOX"\r\n$/);
+  assert.match(writes[2], /^A0003 IDLE\r\n$/);
+  assert.equal(writes[3], "DONE\r\n");
+  assert.equal(writes.at(-1), "CLOSE");
+});
+
+test("watchIMAPMailbox renews IDLE without refreshing", async () => {
+  const controller = new AbortController();
+  let readyCount = 0;
+  let changes = 0;
+  const { socket, writes } = createIMAPSocket([
+    "* OK Skylane test IMAP ready\r\n",
+    "A0001 OK LOGIN completed\r\n",
+    "* 5 EXISTS\r\nA0002 OK SELECT completed\r\n",
+    "+ idling\r\n",
+  ], {
+    onWrite(value, push) {
+      if (value === "DONE\r\n" && writes.some((write) => /^A0003 IDLE/.test(write))) {
+        push("A0003 OK IDLE completed\r\n");
+      }
+      if (/^A0004 IDLE/.test(value)) {
+        push("+ idling again\r\n");
+      }
+    },
+  });
+
+  await assert.rejects(
+    watchIMAPMailbox({
+      email: "you@gmail.com",
+      password: "app-password",
+      host: "imap.gmail.com",
+      port: "993",
+      mailbox: "INBOX",
+      connect: async () => socket,
+      signal: controller.signal,
+      idleRenewMs: 10,
+      onReady() {
+        readyCount += 1;
+        if (readyCount === 2) {
+          controller.abort();
+        }
+      },
+      onChange() {
+        changes += 1;
+      },
+    }),
+    { name: "AbortError" },
+  );
+
+  assert.equal(readyCount, 2);
+  assert.equal(changes, 0);
+  assert.match(writes[2], /^A0003 IDLE\r\n$/);
+  assert.equal(writes[3], "DONE\r\n");
+  assert.match(writes[4], /^A0004 IDLE\r\n$/);
+  assert.equal(writes[5], "DONE\r\n");
+  assert.equal(writes.at(-1), "CLOSE");
+});
+
+test("watchIMAPMailbox aborts during IDLE with best-effort DONE", async () => {
+  const controller = new AbortController();
+  const { socket, writes } = createIMAPSocket([
+    "* OK Skylane test IMAP ready\r\n",
+    "A0001 OK LOGIN completed\r\n",
+    "* 5 EXISTS\r\nA0002 OK SELECT completed\r\n",
+    "+ idling\r\n",
+  ]);
+
+  await assert.rejects(
+    watchIMAPMailbox({
+      email: "you@gmail.com",
+      password: "app-password",
+      host: "imap.gmail.com",
+      port: "993",
+      mailbox: "INBOX",
+      connect: async () => socket,
+      signal: controller.signal,
+      onReady() {
+        controller.abort();
+      },
+    }),
+    { name: "AbortError" },
+  );
+
+  assert.match(writes[2], /^A0003 IDLE\r\n$/);
+  assert.equal(writes[3], "DONE\r\n");
+  assert.equal(writes[4], "CLOSE");
+});
+
+test("watchIMAPMailbox rejects when an IMAP command fails", async () => {
+  const { socket } = createIMAPSocket([
+    "* OK Skylane test IMAP ready\r\n",
+    "A0001 NO LOGIN failed\r\n",
+  ]);
+
+  await assert.rejects(
+    watchIMAPMailbox({
+      email: "you@gmail.com",
+      password: "app-password",
+      host: "imap.gmail.com",
+      port: "993",
+      mailbox: "INBOX",
+      connect: async () => socket,
+    }),
+    /A0001 NO LOGIN failed/,
+  );
 });
 
 test("fetchIMAPMessageDetail fetches the full UID body without marking the message read", async () => {

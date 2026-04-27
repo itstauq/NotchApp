@@ -1,5 +1,6 @@
 const DEFAULT_MAX_ROWS = 20;
 const DEFAULT_TIMEOUT_MS = 30000;
+const DEFAULT_IDLE_RENEW_MS = 25 * 60 * 1000;
 const LOGOUT_TIMEOUT_MS = 1000;
 const decoder = new TextDecoder();
 
@@ -35,6 +36,53 @@ function delay(ms) {
   });
 }
 
+function createAbortError() {
+  if (typeof DOMException === "function") {
+    return new DOMException("The operation was aborted.", "AbortError");
+  }
+
+  const error = new Error("The operation was aborted.");
+  error.name = "AbortError";
+  return error;
+}
+
+function isAbortError(error) {
+  return error?.name === "AbortError";
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) {
+    throw createAbortError();
+  }
+}
+
+function abortableDelay(ms, signal) {
+  if (signal?.aborted) {
+    return Promise.reject(createAbortError());
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(resolve, ms);
+    const abort = () => {
+      clearTimeout(timeout);
+      reject(createAbortError());
+    };
+
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
+function linkedAbortController(signal) {
+  const controller = new AbortController();
+  if (signal?.aborted) {
+    controller.abort();
+    return controller;
+  }
+
+  signal?.addEventListener("abort", () => controller.abort(), { once: true });
+  return controller;
+}
+
 function taggedStatus(response, tag) {
   const line = response
     .split(/\r?\n/)
@@ -43,8 +91,8 @@ function taggedStatus(response, tag) {
   return { line, status };
 }
 
-async function readChunk(socket, signal) {
-  const chunk = await socket.read({ maxBytes: 65536, timeoutMs: DEFAULT_TIMEOUT_MS, signal });
+async function readChunk(socket, signal, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  const chunk = await socket.read({ maxBytes: 65536, timeoutMs, signal });
   if (chunk == null) {
     return null;
   }
@@ -61,11 +109,11 @@ async function createIMAPSession(options) {
   const nextTag = tagFactory();
   let buffer = "";
 
-  async function ensureBuffered(signal) {
+  async function ensureBuffered(signal, timeoutMs) {
     if (buffer.length > 0) {
       return true;
     }
-    const chunk = await readChunk(socket, signal);
+    const chunk = await readChunk(socket, signal, timeoutMs);
     if (chunk == null) {
       return false;
     }
@@ -73,7 +121,7 @@ async function createIMAPSession(options) {
     return true;
   }
 
-  async function readLine(signal) {
+  async function readLine(signal, timeoutMs = DEFAULT_TIMEOUT_MS) {
     while (true) {
       const newlineIndex = buffer.indexOf("\r\n");
       if (newlineIndex >= 0) {
@@ -82,7 +130,7 @@ async function createIMAPSession(options) {
         return line;
       }
 
-      const hasMore = await ensureBuffered(signal);
+      const hasMore = await ensureBuffered(signal, timeoutMs);
       if (!hasMore) {
         if (buffer.length === 0) {
           return null;
@@ -95,9 +143,9 @@ async function createIMAPSession(options) {
     }
   }
 
-  async function readLiteral(byteCount, signal) {
+  async function readLiteral(byteCount, signal, timeoutMs = DEFAULT_TIMEOUT_MS) {
     while (buffer.length < byteCount) {
-      const chunk = await readChunk(socket, signal);
+      const chunk = await readChunk(socket, signal, timeoutMs);
       if (chunk == null) {
         break;
       }
@@ -109,10 +157,10 @@ async function createIMAPSession(options) {
     return literal;
   }
 
-  async function readResponse(tag, signal) {
+  async function readResponse(tag, signal, timeoutMs = DEFAULT_TIMEOUT_MS) {
     let response = "";
     while (true) {
-      const line = await readLine(signal);
+      const line = await readLine(signal, timeoutMs);
       if (line == null) {
         throw new Error(`IMAP connection closed before ${tag} completed.`);
       }
@@ -121,7 +169,7 @@ async function createIMAPSession(options) {
 
       const literalMatch = line.match(/\{(\d+)\}$/);
       if (literalMatch) {
-        response += await readLiteral(Number.parseInt(literalMatch[1], 10), signal);
+        response += await readLiteral(Number.parseInt(literalMatch[1], 10), signal, timeoutMs);
       }
 
       if (line.startsWith(`${tag} `)) {
@@ -145,9 +193,15 @@ async function createIMAPSession(options) {
 
   return {
     command,
-    async close() {
-      const logout = socket.write(`${nextTag()} LOGOUT\r\n`).catch(() => {});
-      await Promise.race([logout, delay(LOGOUT_TIMEOUT_MS)]);
+    nextTag,
+    readLine,
+    readResponse,
+    writeRaw: (value) => socket.write(value),
+    async close(options = {}) {
+      if (options.logout !== false) {
+        const logout = socket.write(`${nextTag()} LOGOUT\r\n`).catch(() => {});
+        await Promise.race([logout, delay(LOGOUT_TIMEOUT_MS)]);
+      }
       await socket.close();
     },
   };
@@ -369,6 +423,122 @@ function createSessionOptions(options) {
     port: parsePort(options.port),
     signal: options.signal,
   };
+}
+
+function isIdleMailboxUpdate(line) {
+  return /^\*\s+\d+\s+(EXISTS|EXPUNGE|FETCH|RECENT)\b/i.test(line);
+}
+
+async function waitForIdleLineOrRenew(session, options) {
+  const readController = linkedAbortController(options.signal);
+  let didAbortForRenewal = false;
+  const readPromise = session
+    .readLine(readController.signal, options.idleRenewMs + 1000)
+    .then((line) => ({ type: "line", line }))
+    .catch((error) => {
+      if (didAbortForRenewal && isAbortError(error)) {
+        return { type: "renew" };
+      }
+
+      throw error;
+  });
+  const renewPromise = abortableDelay(options.idleRenewMs, options.signal).then(() => ({ type: "renew" }));
+  renewPromise.catch(() => {});
+  const result = await Promise.race([readPromise, renewPromise]);
+
+  if (result.type === "renew") {
+    didAbortForRenewal = true;
+    readController.abort();
+    readPromise.catch(() => {});
+  }
+
+  return result;
+}
+
+async function finishIdle(session, tag, signal) {
+  await session.writeRaw("DONE\r\n");
+  const response = await session.readResponse(tag, signal);
+  const { status, line } = taggedStatus(response, tag);
+  if (status !== "OK") {
+    throw new Error(line || "IMAP IDLE failed.");
+  }
+}
+
+export async function watchIMAPMailbox(options) {
+  const host = normalizeText(options.host);
+  const email = normalizeText(options.email);
+  const password = normalizeText(options.password);
+  const mailbox = normalizeText(options.mailbox) || "INBOX";
+  const idleRenewMs = Math.max(1000, Number(options.idleRenewMs) || DEFAULT_IDLE_RENEW_MS);
+
+  if (!host || !email || !password) {
+    return false;
+  }
+
+  const session = await createIMAPSession({
+    ...createSessionOptions(options),
+    host,
+  });
+  let currentIdleTag = null;
+
+  try {
+    await session.command(`LOGIN ${quoteIMAPString(email)} ${quoteIMAPString(password)}`, options.signal);
+    await session.command(`SELECT ${quoteIMAPString(mailbox)}`, options.signal);
+
+    while (true) {
+      throwIfAborted(options.signal);
+
+      const tag = session.nextTag();
+      currentIdleTag = tag;
+      await session.writeRaw(`${tag} IDLE\r\n`);
+
+      const continuation = await session.readLine(options.signal);
+      if (continuation == null) {
+        throw new Error(`IMAP connection closed before ${tag} IDLE continuation.`);
+      }
+      if (!continuation.startsWith("+")) {
+        throw new Error(`IMAP server rejected IDLE: ${continuation}`);
+      }
+
+      options.onReady?.();
+      throwIfAborted(options.signal);
+
+      while (true) {
+        const idleResult = await waitForIdleLineOrRenew(session, {
+          signal: options.signal,
+          idleRenewMs,
+        });
+
+        if (idleResult.type === "renew") {
+          await finishIdle(session, tag, options.signal);
+          currentIdleTag = null;
+          break;
+        }
+
+        const line = idleResult.line;
+        if (line == null) {
+          throw new Error("IMAP connection closed during IDLE.");
+        }
+
+        if (!isIdleMailboxUpdate(line)) {
+          continue;
+        }
+
+        await finishIdle(session, tag, options.signal);
+        currentIdleTag = null;
+        await options.onChange?.();
+        break;
+      }
+    }
+  } catch (error) {
+    if (isAbortError(error) && currentIdleTag != null) {
+      await session.writeRaw("DONE\r\n").catch(() => {});
+    }
+
+    throw error;
+  } finally {
+    await session.close({ logout: !options.signal?.aborted });
+  }
 }
 
 export async function fetchUnreadIMAPMessages(options) {
